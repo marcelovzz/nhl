@@ -1,6 +1,6 @@
 """
 styles_nhl.py
-Inyección de estilos CSS y renderizado de tarjetas idéntico a 'TERMINAL SHARP: NFL QUANT'.
+Inyección de estilos CSS y generación de HTML sin indentación para tarjetas idénticas a 'TERMINAL SHARP: NFL QUANT'.
 Diseñado para rejilla estricta de 3 columnas (3x3) con fondo '#0e1621', bordes cian/verde,
 marcadores proyectados en verde neón (#2bd99f / #00ffcc), bloque central Puck-Engine,
 badges de valor (#0f382c) y botón expandible inferior 'ANÁLISIS DETALLADO →'.
@@ -11,13 +11,20 @@ import streamlit as st
 from sync_espn_nhl import get_team_logo_url
 
 
+def _clean_html(raw_html: str) -> str:
+    """
+    Elimina espacios iniciales de cada línea y líneas vacías para evitar que el parser
+    Markdown de Streamlit interprete líneas con >=4 espacios como bloques de código <pre><code>.
+    """
+    return "\n".join(line.strip() for line in raw_html.splitlines() if line.strip())
+
+
 def inject_cyberpunk_styles() -> None:
     """Inyecta la hoja de estilos Dark Mode idéntica a 'TERMINAL SHARP: NFL QUANT'."""
-    st.markdown(
+    css_html = _clean_html(
         """
         <style>
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
-
         :root {
             --bg-app: #080c14;
             --card-bg: #0e1621;
@@ -30,21 +37,17 @@ def inject_cyberpunk_styles() -> None:
             --text-primary: #f0f6fc;
             --text-secondary: #8b949e;
         }
-
         .stApp {
             background-color: var(--bg-app);
             background-image: radial-gradient(circle at 50% 0%, #111c2d 0%, #080c14 70%);
             color: var(--text-primary);
             font-family: 'Inter', sans-serif;
         }
-
         .block-container {
             padding-top: 1.5rem !important;
             padding-bottom: 2rem !important;
             max-width: 98% !important;
         }
-
-        /* Banner Superior Terminal Sharp */
         .terminal-banner {
             background: linear-gradient(180deg, #0e1621 0%, #0d1117 100%);
             border: 1px solid rgba(43, 217, 159, 0.35);
@@ -68,8 +71,6 @@ def inject_cyberpunk_styles() -> None:
             margin-top: 4px;
             font-family: 'JetBrains Mono', monospace;
         }
-
-        /* Tarjeta de Partido idéntica a NFL QUANT */
         .sharp-card {
             background: linear-gradient(180deg, #0e1621 0%, #0d1117 100%);
             border: 1px solid rgba(43, 217, 159, 0.32);
@@ -84,8 +85,6 @@ def inject_cyberpunk_styles() -> None:
             border-color: #00ffcc;
             box-shadow: 0 6px 25px rgba(0, 255, 204, 0.14);
         }
-
-        /* Encabezado de tarjeta: Badge '🏒 NHL • FECHA' y hora */
         .sharp-card-header {
             display: flex;
             justify-content: space-between;
@@ -112,8 +111,6 @@ def inject_cyberpunk_styles() -> None:
             font-size: 0.74rem;
             font-weight: 600;
         }
-
-        /* Filas de Equipos (Logo + Nombre a la izquierda, Marcador Proyectado grande a la derecha) */
         .teams-container {
             display: flex;
             flex-direction: column;
@@ -167,8 +164,6 @@ def inject_cyberpunk_styles() -> None:
             line-height: 1;
             margin-left: 10px;
         }
-
-        /* Bloque central de cuotas y proyección Puck-Engine */
         .puck-engine-box {
             background: rgba(13, 17, 23, 0.85);
             border: 1px solid rgba(255, 255, 255, 0.07);
@@ -190,8 +185,6 @@ def inject_cyberpunk_styles() -> None:
             font-size: 0.72rem;
             font-weight: 500;
         }
-
-        /* Badges de Valor (+EV) */
         .ev-badge-positive {
             background-color: #0f382c;
             border: 1px solid #2bd99f;
@@ -219,8 +212,6 @@ def inject_cyberpunk_styles() -> None:
             letter-spacing: 0.8px;
             text-transform: uppercase;
         }
-
-        /* Estilizar el st.expander inferior 'ANÁLISIS DETALLADO →' acoplado a la tarjeta */
         div[data-testid="stExpander"] {
             background: #0d1117 !important;
             border: 1px solid rgba(43, 217, 159, 0.32) !important;
@@ -244,41 +235,43 @@ def inject_cyberpunk_styles() -> None:
             background: rgba(15, 56, 44, 0.45) !important;
         }
         </style>
-        """,
-        unsafe_allow_html=True,
+        """
     )
+    st.markdown(css_html, unsafe_allow_html=True)
+
+
+def build_header_banner_html(date_label: str, total_games: int, sharp_signals_count: int) -> str:
+    """Construye el HTML sin indentación para el encabezado superior de la terminal."""
+    raw = f"""
+<div class="terminal-banner">
+<div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+<div>
+<p class="terminal-title">🏒 TERMINAL SHARP: NHL QUANT</p>
+<p class="terminal-subtitle">PUCK-ENGINE BIVARIATE POISSON / DIXON-COLES • 5,000 MONTE CARLO (3v3 OT + SO) • GOALIE SV%</p>
+</div>
+<div style="display:flex; gap:8px; align-items:center; font-family:'JetBrains Mono', monospace;">
+<span class="nhl-date-badge">📅 {date_label}</span>
+<span class="nhl-date-badge">🏒 PARTIDOS: {total_games}</span>
+<span class="nhl-date-badge" style="background:#0f382c; border-color:#2bd99f; color:#00ffcc;">🔥 +EV: {sharp_signals_count}</span>
+</div>
+</div>
+</div>
+"""
+    return _clean_html(raw)
 
 
 def render_header_banner(date_label: str, total_games: int, sharp_signals_count: int) -> None:
-    """Renderiza el encabezado superior de la terminal."""
+    """Renderiza el encabezado superior de la terminal con unsafe_allow_html=True."""
     st.markdown(
-        f"""
-        <div class="terminal-banner">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
-                <div>
-                    <p class="terminal-title">🏒 TERMINAL SHARP: NHL QUANT</p>
-                    <p class="terminal-subtitle">
-                        PUCK-ENGINE BIVARIATE POISSON / DIXON-COLES • 5,000 MONTE CARLO (3v3 OT + SO) • GOALIE SV%
-                    </p>
-                </div>
-                <div style="display:flex; gap:8px; align-items:center; font-family:'JetBrains Mono', monospace;">
-                    <span class="nhl-date-badge">📅 {date_label}</span>
-                    <span class="nhl-date-badge">🏒 PARTIDOS: {total_games}</span>
-                    <span class="nhl-date-badge" style="background:#0f382c; border-color:#2bd99f; color:#00ffcc;">
-                        🔥 +EV: {sharp_signals_count}
-                    </span>
-                </div>
-            </div>
-        </div>
-        """,
+        build_header_banner_html(date_label, total_games, sharp_signals_count),
         unsafe_allow_html=True,
     )
 
 
-def render_game_card(g: Dict[str, Any], hfa_goals: float = 0.28, ev_threshold: float = 2.0) -> None:
+def build_game_card_html(g: Dict[str, Any], hfa_goals: float = 0.28, ev_threshold: float = 2.0) -> str:
     """
-    Renderiza la tarjeta individual de partido idéntica a 'TERMINAL SHARP: NFL QUANT',
-    seguida por el botón expandible 'ANÁLISIS DETALLADO →' ocupando todo el ancho de la tarjeta.
+    Genera el string HTML de la tarjeta de partido completamente limpio de indentaciones (>=4 espacios)
+    ni saltos de línea en blanco para evitar que Markdown lo convierta en bloque de código.
     """
     away = g["away_abbr"]
     home = g["home_abbr"]
@@ -314,65 +307,71 @@ def render_game_card(g: Dict[str, Any], hfa_goals: float = 0.28, ev_threshold: f
     else:
         ev_badge_html = '<div class="ev-badge-neutral">LÍNEA SIN VALOR</div>'
 
-    card_html = f"""
-    <div class="sharp-card">
-        <div class="sharp-card-header">
-            <span class="nhl-date-badge">🏒 NHL • {formatted_date}</span>
-            <span class="nhl-time-label">🕒 {time_or_status}</span>
-        </div>
+    raw_card = f"""
+<div class="sharp-card">
+<div class="sharp-card-header">
+<span class="nhl-date-badge">🏒 NHL • {formatted_date}</span>
+<span class="nhl-time-label">🕒 {time_or_status}</span>
+</div>
+<div class="teams-container">
+<div class="team-row">
+<div class="team-info-left">
+<img src="{away_logo}" class="team-logo-img" alt="{away}" onerror="this.style.display='none'"/>
+<div class="team-name-block">
+<span class="team-full-name">{g['away_name']}</span>
+<span class="team-sub-meta">{away} • 🥅 {g['away_goalie']} ({g['away_sv_pct']:.3f})</span>
+</div>
+</div>
+<div class="proj-score-right">{proj_away:.1f}</div>
+</div>
+<div class="team-row">
+<div class="team-info-left">
+<img src="{home_logo}" class="team-logo-img" alt="{home}" onerror="this.style.display='none'"/>
+<div class="team-name-block">
+<span class="team-full-name">{g['home_name']}</span>
+<span class="team-sub-meta">{home} • 🥅 {g['home_goalie']} ({g['home_sv_pct']:.3f})</span>
+</div>
+</div>
+<div class="proj-score-right">{proj_home:.1f}</div>
+</div>
+</div>
+<div class="puck-engine-box">
+<div class="puck-engine-line1">Proyección Puck-Engine: {away} {proj_away:.1f} - {proj_home:.1f} {home}</div>
+<div class="puck-engine-line2">Cuota Justa ML: {away} {fair_away:.2f} | {home} {fair_home:.2f} &middot; Total Proy: {proj_total:.1f} &middot; HFA +{hfa_goals:.2f}</div>
+</div>
+{ev_badge_html}
+</div>
+"""
+    return _clean_html(raw_card)
 
-        <div class="teams-container">
-            <div class="team-row">
-                <div class="team-info-left">
-                    <img src="{away_logo}" class="team-logo-img" alt="{away}" onerror="this.style.display='none'"/>
-                    <div class="team-name-block">
-                        <span class="team-full-name">{g['away_name']}</span>
-                        <span class="team-sub-meta">{away} • 🥅 {g['away_goalie']} ({g['away_sv_pct']:.3f})</span>
-                    </div>
-                </div>
-                <div class="proj-score-right">{proj_away:.1f}</div>
-            </div>
 
-            <div class="team-row">
-                <div class="team-info-left">
-                    <img src="{home_logo}" class="team-logo-img" alt="{home}" onerror="this.style.display='none'"/>
-                    <div class="team-name-block">
-                        <span class="team-full-name">{g['home_name']}</span>
-                        <span class="team-sub-meta">{home} • 🥅 {g['home_goalie']} ({g['home_sv_pct']:.3f})</span>
-                    </div>
-                </div>
-                <div class="proj-score-right">{proj_home:.1f}</div>
-            </div>
-        </div>
-
-        <div class="puck-engine-box">
-            <div class="puck-engine-line1">
-                Proyección Puck-Engine: {away} {proj_away:.1f} - {proj_home:.1f} {home}
-            </div>
-            <div class="puck-engine-line2">
-                Cuota Justa ML: {away} {fair_away:.2f} | {home} {fair_home:.2f} &middot; Total Proy: {proj_total:.1f} &middot; HFA +{hfa_goals:.2f}
-            </div>
-        </div>
-
-        {ev_badge_html}
-    </div>
+def render_game_card(g: Dict[str, Any], hfa_goals: float = 0.28, ev_threshold: float = 2.0) -> None:
     """
+    Renderiza la tarjeta individual de partido con unsafe_allow_html=True,
+    seguida por el botón expandible 'ANÁLISIS DETALLADO →'.
+    """
+    away = g["away_abbr"]
+    home = g["home_abbr"]
+    bb = g["best_bet"]
+
+    card_html = build_game_card_html(g, hfa_goals=hfa_goals, ev_threshold=ev_threshold)
     st.markdown(card_html, unsafe_allow_html=True)
 
     with st.expander("ANÁLISIS DETALLADO →", expanded=False):
-        st.markdown(
+        detail_md = _clean_html(
             f"""
-            **⚡ Simulación Monte Carlo ({g.get('prob_ot_pct', 0):.1f}% prob. 3v3 OT | {g.get('prob_so_pct', 0):.1f}% Shootout)**
-            - **Goles Esperados Regulación (60m):** `{away} {g['lambda_away_reg']:.2f}` vs `{home} {g['lambda_home_reg']:.2f}`
-            - **Moneyline (Sin Empate):**
-              - `{away} ML`: Prob **{g['prob_away_ml_pct']:.1f}%** | Justa **{g['fair_away_ml']:.2f}** | Mkt **{g['away_ml_dec']:.2f}** (`EV {g['ev_away_ml']:+.1f}%`)
-              - `{home} ML`: Prob **{g['prob_home_ml_pct']:.1f}%** | Justa **{g['fair_home_ml']:.2f}** | Mkt **{g['home_ml_dec']:.2f}** (`EV {g['ev_home_ml']:+.1f}%`)
-            - **Puck Line (+1.5 / -1.5):**
-              - `{away} {g['away_pl_line']:+.1f}`: Prob **{g['prob_away_pl_pct']:.1f}%** | Justa **{g['fair_away_pl']:.2f}** | Mkt **{g['away_pl_dec']:.2f}** (`EV {g['ev_away_pl']:+.1f}%`)
-              - `{home} {g['home_pl_line']:+.1f}`: Prob **{g['prob_home_pl_pct']:.1f}%** | Justa **{g['fair_home_pl']:.2f}** | Mkt **{g['home_pl_dec']:.2f}** (`EV {g['ev_home_pl']:+.1f}%`)
-            - **Totales (Línea {g['total_line']:.1f}):**
-              - `OVER {g['total_line']:.1f}`: Prob **{g['prob_over_pct']:.1f}%** | Justa **{g['fair_over']:.2f}** | Mkt **{g['over_dec']:.2f}** (`EV {g['ev_over']:+.1f}%`)
-              - `UNDER {g['total_line']:.1f}`: Prob **{g['prob_under_pct']:.1f}%** | Justa **{g['fair_under']:.2f}** | Mkt **{g['under_dec']:.2f}** (`EV {g['ev_under']:+.1f}%`)
-            - **Quarter-Kelly Stake Sugerido ({bb['selection']}):** `{bb['kelly_pct']:.2f}%` de banca
-            """
+**⚡ Simulación Monte Carlo ({g.get('prob_ot_pct', 0):.1f}% prob. 3v3 OT | {g.get('prob_so_pct', 0):.1f}% Shootout)**
+- **Goles Esperados Regulación (60m):** `{away} {g['lambda_away_reg']:.2f}` vs `{home} {g['lambda_home_reg']:.2f}`
+- **Moneyline (Sin Empate):**
+  - `{away} ML`: Prob **{g['prob_away_ml_pct']:.1f}%** | Justa **{g['fair_away_ml']:.2f}** | Mkt **{g['away_ml_dec']:.2f}** (`EV {g['ev_away_ml']:+.1f}%`)
+  - `{home} ML`: Prob **{g['prob_home_ml_pct']:.1f}%** | Justa **{g['fair_home_ml']:.2f}** | Mkt **{g['home_ml_dec']:.2f}** (`EV {g['ev_home_ml']:+.1f}%`)
+- **Puck Line (+1.5 / -1.5):**
+  - `{away} {g['away_pl_line']:+.1f}`: Prob **{g['prob_away_pl_pct']:.1f}%** | Justa **{g['fair_away_pl']:.2f}** | Mkt **{g['away_pl_dec']:.2f}** (`EV {g['ev_away_pl']:+.1f}%`)
+  - `{home} {g['home_pl_line']:+.1f}`: Prob **{g['prob_home_pl_pct']:.1f}%** | Justa **{g['fair_home_pl']:.2f}** | Mkt **{g['home_pl_dec']:.2f}** (`EV {g['ev_home_pl']:+.1f}%`)
+- **Totales (Línea {g['total_line']:.1f}):**
+  - `OVER {g['total_line']:.1f}`: Prob **{g['prob_over_pct']:.1f}%** | Justa **{g['fair_over']:.2f}** | Mkt **{g['over_dec']:.2f}** (`EV {g['ev_over']:+.1f}%`)
+  - `UNDER {g['total_line']:.1f}`: Prob **{g['prob_under_pct']:.1f}%** | Justa **{g['fair_under']:.2f}** | Mkt **{g['under_dec']:.2f}** (`EV {g['ev_under']:+.1f}%`)
+- **Quarter-Kelly Stake Sugerido ({bb['selection']}):** `{bb['kelly_pct']:.2f}%` de banca
+"""
         )
+        st.markdown(detail_md, unsafe_allow_html=True)

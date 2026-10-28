@@ -4,10 +4,8 @@ Aplicación principal Streamlit — "TERMINAL SHARP: NHL QUANT".
 Interfaz visual idéntica a 'TERMINAL SHARP: NFL QUANT':
 - Configuración de página en ancho completo: st.set_page_config(layout="wide", page_title="TERMINAL SHARP: NHL QUANT").
 - Rejilla estricta de 3 columnas (col1, col2, col3 = st.columns(3)) formando una matriz limpia (3x3).
-- Carga automática con respaldo en disco ('nhl_stats.xlsx') y uploader opcional.
-- Selector de fecha diaria ('st.date_input') y botones rápidos [◀ Ayer] [Hoy] [Mañana ▶].
-- Pestañas: "🏒 Cartelera & Momios en Vivo" y "📈 Auditoría & Calibración".
-- Exportación de predicciones a Excel (.xlsx) con io.BytesIO.
+- Todas las llamadas a st.markdown() que renderizan tarjetas HTML incluyen explícitamente unsafe_allow_html=True
+  y strings HTML sin indentación de 4 espacios para evitar bloques de código Markdown.
 """
 
 import io
@@ -32,7 +30,11 @@ from setup_data import (
     read_excel_safe,
     write_xlsx_bytes,
 )
-from styles_nhl import inject_cyberpunk_styles, render_game_card, render_header_banner
+from styles_nhl import (
+    build_game_card_html,
+    build_header_banner_html,
+    inject_cyberpunk_styles,
+)
 from sync_espn_nhl import fetch_nhl_scoreboard, format_date_yyyymmdd, get_demo_slate
 
 st.set_page_config(
@@ -80,6 +82,36 @@ def export_excel_bytes(predictions_df: pd.DataFrame, stats_df: pd.DataFrame) -> 
     return buffer.getvalue()
 
 
+def render_card_in_column(g: Dict[str, Any], hfa_goals: float, ev_threshold: float) -> None:
+    """
+    Imprime el bloque HTML de la tarjeta del partido en Streamlit con unsafe_allow_html=True
+    y sin indentaciones de 4 espacios, seguido del expander de análisis detallado.
+    """
+    card_html = build_game_card_html(g, hfa_goals=hfa_goals, ev_threshold=ev_threshold)
+    st.markdown(card_html, unsafe_allow_html=True)
+
+    away = g["away_abbr"]
+    home = g["home_abbr"]
+    bb = g["best_bet"]
+
+    with st.expander("ANÁLISIS DETALLADO →", expanded=False):
+        detail_lines = [
+            f"<div><b>⚡ Simulación Monte Carlo ({g.get('prob_ot_pct', 0):.1f}% prob. 3v3 OT | {g.get('prob_so_pct', 0):.1f}% Shootout)</b></div>",
+            f"<div>• <b>Goles Esperados Regulación (60m):</b> <code>{away} {g['lambda_away_reg']:.2f}</code> vs <code>{home} {g['lambda_home_reg']:.2f}</code></div>",
+            f"<div>• <b>Moneyline (Sin Empate):</b></div>",
+            f"<div>&nbsp;&nbsp;◦ <code>{away} ML</code>: Prob <b>{g['prob_away_ml_pct']:.1f}%</b> | Justa <b>{g['fair_away_ml']:.2f}</b> | Mkt <b>{g['away_ml_dec']:.2f}</b> (<code>EV {g['ev_away_ml']:+.1f}%</code>)</div>",
+            f"<div>&nbsp;&nbsp;◦ <code>{home} ML</code>: Prob <b>{g['prob_home_ml_pct']:.1f}%</b> | Justa <b>{g['fair_home_ml']:.2f}</b> | Mkt <b>{g['home_ml_dec']:.2f}</b> (<code>EV {g['ev_home_ml']:+.1f}%</code>)</div>",
+            f"<div>• <b>Puck Line (+1.5 / -1.5):</b></div>",
+            f"<div>&nbsp;&nbsp;◦ <code>{away} {g['away_pl_line']:+.1f}</code>: Prob <b>{g['prob_away_pl_pct']:.1f}%</b> | Justa <b>{g['fair_away_pl']:.2f}</b> | Mkt <b>{g['away_pl_dec']:.2f}</b> (<code>EV {g['ev_away_pl']:+.1f}%</code>)</div>",
+            f"<div>&nbsp;&nbsp;◦ <code>{home} {g['home_pl_line']:+.1f}</code>: Prob <b>{g['prob_home_pl_pct']:.1f}%</b> | Justa <b>{g['fair_home_pl']:.2f}</b> | Mkt <b>{g['home_pl_dec']:.2f}</b> (<code>EV {g['ev_home_pl']:+.1f}%</code>)</div>",
+            f"<div>• <b>Totales (Línea {g['total_line']:.1f}):</b></div>",
+            f"<div>&nbsp;&nbsp;◦ <code>OVER {g['total_line']:.1f}</code>: Prob <b>{g['prob_over_pct']:.1f}%</b> | Justa <b>{g['fair_over']:.2f}</b> | Mkt <b>{g['over_dec']:.2f}</b> (<code>EV {g['ev_over']:+.1f}%</code>)</div>",
+            f"<div>&nbsp;&nbsp;◦ <code>UNDER {g['total_line']:.1f}</code>: Prob <b>{g['prob_under_pct']:.1f}%</b> | Justa <b>{g['fair_under']:.2f}</b> | Mkt <b>{g['under_dec']:.2f}</b> (<code>EV {g['ev_under']:+.1f}%</code>)</div>",
+            f"<div>• <b>Quarter-Kelly Stake Sugerido ({bb['selection']}):</b> <code>{bb['kelly_pct']:.2f}%</code> de banca</div>",
+        ]
+        st.markdown("\n".join(detail_lines), unsafe_allow_html=True)
+
+
 def main() -> None:
     if "selected_date" not in st.session_state:
         st.session_state["selected_date"] = date.today()
@@ -88,7 +120,7 @@ def main() -> None:
     # SIDEBAR: CONFIGURACIÓN, BASE DE DATOS Y PARÁMETROS DEL MOTOR
     # -------------------------------------------------------------------------
     with st.sidebar:
-        st.markdown("### ⚙️ CONTROL QUANT NHL")
+        st.markdown("<h3>⚙️ CONTROL QUANT NHL</h3>", unsafe_allow_html=True)
         st.caption("Base de Datos de 32 Franquicias & Goalies")
 
         if not os.path.exists(NHL_DEFAULT_FILENAME):
@@ -104,8 +136,8 @@ def main() -> None:
 
         stats_df = load_team_stats(uploaded_excel)
 
-        st.markdown("---")
-        st.markdown("### 🧮 PARÁMETROS PUCK-ENGINE")
+        st.markdown("<hr/>", unsafe_allow_html=True)
+        st.markdown("<h3>🧮 PARÁMETROS PUCK-ENGINE</h3>", unsafe_allow_html=True)
         hfa_goals = st.slider(
             "Ventaja de Localía (HFA Goles)",
             min_value=0.00,
@@ -219,11 +251,12 @@ def main() -> None:
             )
 
     total_sharp_signals = sum(1 for g in analyzed_games if g["best_bet"]["ev_pct"] >= ev_threshold)
-    render_header_banner(
+    banner_html = build_header_banner_html(
         date_label=active_date.strftime("%Y-%m-%d"),
         total_games=len(analyzed_games),
         sharp_signals_count=total_sharp_signals,
     )
+    st.markdown(banner_html, unsafe_allow_html=True)
 
     if espn_data.get("error"):
         st.warning(f"⚠️ {espn_data['error']}")
@@ -250,7 +283,6 @@ def main() -> None:
         if not analyzed_games:
             st.warning("No se encontraron partidos para la fecha seleccionada.")
         else:
-            # Renderizado en bloques de filas de 3 columnas estrictas (col1, col2, col3 = st.columns(3))
             for row_start in range(0, len(analyzed_games), 3):
                 col1, col2, col3 = st.columns(3)
                 row_cols = (col1, col2, col3)
@@ -258,7 +290,7 @@ def main() -> None:
 
                 for col_idx, game_item in enumerate(row_slice):
                     with row_cols[col_idx]:
-                        render_game_card(
+                        render_card_in_column(
                             game_item,
                             hfa_goals=hfa_goals,
                             ev_threshold=ev_threshold,
@@ -271,7 +303,7 @@ def main() -> None:
     # PESTAÑA 2: AUDITORÍA & CALIBRACIÓN POST-PARTIDO
     # =========================================================================
     with tab_audit:
-        st.markdown("#### 📈 Auditoría Post-Partido & Calibración Probabilística")
+        st.markdown("<h4>📈 Auditoría Post-Partido & Calibración Probabilística</h4>", unsafe_allow_html=True)
         st.caption(
             "Evalúa automáticamente los partidos finalizados (`Final` / `Final/OT` / `Final/SO`) "
             "comparando las probabilidades Bivariadas Poisson + Monte Carlo contra el marcador oficial de ESPN."
@@ -322,8 +354,8 @@ def main() -> None:
 
             st.dataframe(pd.DataFrame(audit_table), use_container_width=True, hide_index=True)
 
-        st.markdown("---")
-        st.markdown("#### 🏛️ Power Ratings de las 32 Franquicias NHL (`nhl_stats.xlsx`)")
+        st.markdown("<hr/>", unsafe_allow_html=True)
+        st.markdown("<h4>🏛️ Power Ratings de las 32 Franquicias NHL (<code>nhl_stats.xlsx</code>)</h4>", unsafe_allow_html=True)
         power_df = stats_df.copy()
         power_df["Net_xG_Diff"] = (power_df["xGF_Game"] - power_df["xGA_Game"]).round(2)
         power_df["Net_Goal_Diff"] = (power_df["Goals_For_Game"] - power_df["Goals_Against_Game"]).round(2)
