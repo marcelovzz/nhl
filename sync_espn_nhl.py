@@ -1,7 +1,7 @@
 """
 sync_espn_nhl.py
 Módulo de ingesta en tiempo real desde la API pública de ESPN para NHL.
-Extrae cartelera por fecha ('dates=YYYYMMDD'), momios en formato DECIMAL
+Extrae cartelera por fecha ('dates=YYYYMMDD'), logos oficiales, momios en formato DECIMAL
 (Moneyline, Puck Line +/-1.5, Totales 5.5/6.0/6.5) y marcadores finales para auditoría.
 """
 
@@ -27,6 +27,15 @@ ABBR_NORMALIZATION: Dict[str, str] = {
     "WIN": "WPG",
 }
 
+# Slugs de CDN de ESPN para logos oficiales 500x500
+ESPN_LOGO_SLUGS: Dict[str, str] = {
+    "TBL": "tb",
+    "LAK": "la",
+    "NJD": "nj",
+    "SJS": "sj",
+    "UTA": "utah",
+}
+
 
 def normalize_team_abbr(abbr: str) -> str:
     """Normaliza la abreviatura de ESPN al estándar de 3 letras del modelo."""
@@ -34,6 +43,15 @@ def normalize_team_abbr(abbr: str) -> str:
         return "UNK"
     clean = str(abbr).strip().upper()
     return ABBR_NORMALIZATION.get(clean, clean)
+
+
+def get_team_logo_url(abbr: str, espn_logo_field: Optional[str] = None) -> str:
+    """Retorna la URL del logo oficial del equipo en el CDN de ESPN."""
+    if espn_logo_field and espn_logo_field.startswith("http"):
+        return espn_logo_field
+    norm = normalize_team_abbr(abbr)
+    slug = ESPN_LOGO_SLUGS.get(norm, norm.lower())
+    return f"https://a.espncdn.com/i/teamlogos/nhl/500/{slug}.png"
 
 
 def american_to_decimal(american_odds: Any, default: float = 1.91) -> float:
@@ -61,7 +79,6 @@ def american_to_decimal(american_odds: Any, default: float = 1.91) -> float:
     if val == 0:
         return round(default, 3)
 
-    # Si ya viene en formato decimal (ej. 1.85 o 2.15)
     if 1.01 <= val < 15.0:
         return round(val, 3)
 
@@ -183,7 +200,6 @@ def _parse_odds_block(
             result["home_ml_dec"] = h_dec
             result["away_ml_dec"] = a_dec
 
-    # Determinar quién es favorito para orientar el Puck Line (-1.5 al favorito, +1.5 al underdog)
     home_is_fav = result["home_ml_dec"] <= result["away_ml_dec"]
 
     # 2. PUCK LINE (+1.5 / -1.5)
@@ -242,7 +258,6 @@ def _parse_odds_block(
         try:
             clean_ou = str(ou_raw).upper().replace("O", "").replace("U", "").strip()
             val_ou = float(clean_ou)
-            # Ajustar al escalón NHL estándar más cercano (5.5, 6.0, 6.5)
             parsed_total = min([5.5, 6.0, 6.5], key=lambda x: abs(x - val_ou))
         except ValueError:
             parsed_total = 6.0
@@ -326,10 +341,13 @@ def fetch_nhl_scoreboard(target_date: Any, timeout: int = 10) -> Dict[str, Any]:
         home_name = home_team.get("displayName") or home_team.get("name") or home_abbr
         away_name = away_team.get("displayName") or away_team.get("name") or away_abbr
 
+        home_logo = get_team_logo_url(home_abbr, home_team.get("logo"))
+        away_logo = get_team_logo_url(away_abbr, away_team.get("logo"))
+
         # Estado del partido y auditoría post-partido
         status_obj = comp.get("status") or event.get("status") or {}
         status_type = status_obj.get("type") or {}
-        state = str(status_type.get("state") or "pre").lower()  # 'pre', 'in', 'post'
+        state = str(status_type.get("state") or "pre").lower()
         is_completed = bool(status_type.get("completed", False)) or state == "post"
         status_detail = str(status_type.get("shortDetail") or status_type.get("detail") or "Programado")
         period = int(status_obj.get("period") or 0)
@@ -344,7 +362,6 @@ def fetch_nhl_scoreboard(target_date: Any, timeout: int = 10) -> Dict[str, Any]:
             except (ValueError, TypeError):
                 home_score, away_score = None, None
 
-        # Momios en formato decimal
         odds_list = comp.get("odds") or []
         parsed_odds = _parse_odds_block(odds_list, home_abbr, away_abbr)
 
@@ -364,8 +381,10 @@ def fetch_nhl_scoreboard(target_date: Any, timeout: int = 10) -> Dict[str, Any]:
                 "period": period,
                 "home_abbr": home_abbr,
                 "home_name": home_name,
+                "home_logo": home_logo,
                 "away_abbr": away_abbr,
                 "away_name": away_name,
+                "away_logo": away_logo,
                 "home_score": home_score,
                 "away_score": away_score,
                 **parsed_odds,
@@ -381,121 +400,73 @@ def fetch_nhl_scoreboard(target_date: Any, timeout: int = 10) -> Dict[str, Any]:
 
 def get_demo_slate(target_date: Any) -> List[Dict[str, Any]]:
     """
-    Genera una cartelera de respaldo realista (con partidos en vivo/pre-partido y finalizados)
-    cuando la fecha consultada es fuera de calendario o sin conexión, permitiendo probar toda la terminal.
+    Genera una cartelera de respaldo realista de 9 partidos (matriz 3x3 perfecta)
+    cuando la fecha consultada no tiene juegos programados o no hay conexión.
     """
     date_param = format_date_yyyymmdd(target_date)
-    return [
-        {
-            "game_id": f"DEMO_1_{date_param}",
-            "date_yyyymmdd": date_param,
-            "start_time_iso": f"{date_param[:4]}-{date_param[4:6]}-{date_param[6:8]}T23:00Z",
-            "venue": "Madison Square Garden",
-            "status_state": "pre",
-            "status_detail": "7:00 PM ET",
-            "is_completed": False,
-            "went_to_ot": False,
-            "period": 0,
-            "home_abbr": "NYR",
-            "home_name": "New York Rangers",
-            "away_abbr": "BOS",
-            "away_name": "Boston Bruins",
-            "home_score": None,
-            "away_score": None,
-            "provider": "DraftKings (Demo Slate)",
-            "has_live_odds": True,
-            "home_ml_dec": 1.80,
-            "away_ml_dec": 2.10,
-            "home_pl_line": -1.5,
-            "away_pl_line": 1.5,
-            "home_pl_dec": 2.65,
-            "away_pl_dec": 1.52,
-            "total_line": 5.5,
-            "over_dec": 1.95,
-            "under_dec": 1.87,
-        },
-        {
-            "game_id": f"DEMO_2_{date_param}",
-            "date_yyyymmdd": date_param,
-            "start_time_iso": f"{date_param[:4]}-{date_param[4:6]}-{date_param[6:8]}T23:30Z",
-            "venue": "Amerant Bank Arena",
-            "status_state": "pre",
-            "status_detail": "7:30 PM ET",
-            "is_completed": False,
-            "went_to_ot": False,
-            "period": 0,
-            "home_abbr": "FLA",
-            "home_name": "Florida Panthers",
-            "away_abbr": "TBL",
-            "away_name": "Tampa Bay Lightning",
-            "home_score": None,
-            "away_score": None,
-            "provider": "ESPN BET (Demo Slate)",
-            "has_live_odds": True,
-            "home_ml_dec": 1.76,
-            "away_ml_dec": 2.15,
-            "home_pl_line": -1.5,
-            "away_pl_line": 1.5,
-            "home_pl_dec": 2.50,
-            "away_pl_dec": 1.57,
-            "total_line": 6.0,
-            "over_dec": 1.91,
-            "under_dec": 1.91,
-        },
-        {
-            "game_id": f"DEMO_3_{date_param}",
-            "date_yyyymmdd": date_param,
-            "start_time_iso": f"{date_param[:4]}-{date_param[4:6]}-{date_param[6:8]}T01:00Z",
-            "venue": "Rogers Place",
-            "status_state": "post",
-            "status_detail": "Final",
-            "is_completed": True,
-            "went_to_ot": False,
-            "period": 3,
-            "home_abbr": "EDM",
-            "home_name": "Edmonton Oilers",
-            "away_abbr": "COL",
-            "away_name": "Colorado Avalanche",
-            "home_score": 4,
-            "away_score": 2,
-            "provider": "FanDuel (Demo Slate)",
-            "has_live_odds": True,
-            "home_ml_dec": 1.83,
-            "away_ml_dec": 2.05,
-            "home_pl_line": -1.5,
-            "away_pl_line": 1.5,
-            "home_pl_dec": 2.58,
-            "away_pl_dec": 1.54,
-            "total_line": 6.5,
-            "over_dec": 1.87,
-            "under_dec": 1.95,
-        },
-        {
-            "game_id": f"DEMO_4_{date_param}",
-            "date_yyyymmdd": date_param,
-            "start_time_iso": f"{date_param[:4]}-{date_param[4:6]}-{date_param[6:8]}T02:00Z",
-            "venue": "American Airlines Center",
-            "status_state": "post",
-            "status_detail": "Final/OT",
-            "is_completed": True,
-            "went_to_ot": True,
-            "period": 4,
-            "home_abbr": "DAL",
-            "home_name": "Dallas Stars",
-            "away_abbr": "WPG",
-            "away_name": "Winnipeg Jets",
-            "home_score": 3,
-            "away_score": 2,
-            "provider": "DraftKings (Demo Slate)",
-            "has_live_odds": True,
-            "home_ml_dec": 1.85,
-            "away_ml_dec": 2.00,
-            "home_pl_line": -1.5,
-            "away_pl_line": 1.5,
-            "home_pl_dec": 2.70,
-            "away_pl_dec": 1.50,
-            "total_line": 5.5,
-            "over_dec": 1.98,
-            "under_dec": 1.85,
-        },
+    raw_demos = [
+        ("BOS", "Boston Bruins", "NYR", "New York Rangers", "7:00 PM ET", "pre", False, False, None, None, 1.80, 2.10, -1.5, 2.65, 1.52, 5.5, 1.95, 1.87),
+        ("TBL", "Tampa Bay Lightning", "FLA", "Florida Panthers", "7:00 PM ET", "pre", False, False, None, None, 1.76, 2.15, -1.5, 2.50, 1.57, 6.0, 1.91, 1.95),
+        ("TOR", "Toronto Maple Leafs", "MTL", "Montreal Canadiens", "7:30 PM ET", "pre", False, False, None, None, 2.40, 1.62, 1.5, 1.52, 2.60, 6.5, 1.88, 1.98),
+        ("NJD", "New Jersey Devils", "CAR", "Carolina Hurricanes", "7:30 PM ET", "pre", False, False, None, None, 1.74, 2.20, -1.5, 2.48, 1.58, 6.0, 1.95, 1.90),
+        ("PIT", "Pittsburgh Penguins", "WSH", "Washington Capitals", "8:00 PM ET", "pre", False, False, None, None, 1.91, 1.91, -1.5, 2.75, 1.48, 6.0, 1.91, 1.91),
+        ("MIN", "Minnesota Wild", "NSH", "Nashville Predators", "8:00 PM ET", "pre", False, False, None, None, 1.85, 2.02, -1.5, 2.62, 1.53, 5.5, 1.92, 1.92),
+        ("COL", "Colorado Avalanche", "EDM", "Edmonton Oilers", "9:00 PM ET", "post", True, False, 4, 2, 1.83, 2.05, -1.5, 2.58, 1.54, 6.5, 1.87, 1.95),
+        ("WPG", "Winnipeg Jets", "DAL", "Dallas Stars", "9:30 PM ET", "post", True, True, 3, 2, 1.85, 2.00, -1.5, 2.70, 1.50, 5.5, 1.98, 1.85),
+        ("VAN", "Vancouver Canucks", "VGK", "Vegas Golden Knights", "10:00 PM ET", "pre", False, False, None, None, 1.86, 2.00, -1.5, 2.64, 1.52, 6.0, 1.90, 1.94),
     ]
+
+    demo_games: List[Dict[str, Any]] = []
+    for idx, (
+        away_abbr,
+        away_name,
+        home_abbr,
+        home_name,
+        time_str,
+        state,
+        is_comp,
+        went_ot,
+        h_sc,
+        a_sc,
+        h_ml,
+        a_ml,
+        h_pl_line,
+        h_pl_dec,
+        a_pl_dec,
+        tot_line,
+        ov_dec,
+        un_dec,
+    ) in enumerate(raw_demos, start=1):
+        demo_games.append(
+            {
+                "game_id": f"DEMO_{idx}_{date_param}",
+                "date_yyyymmdd": date_param,
+                "start_time_iso": f"{date_param[:4]}-{date_param[4:6]}-{date_param[6:8]}T23:00Z",
+                "venue": f"{home_name} Arena",
+                "status_state": state,
+                "status_detail": "Final/OT" if went_ot else ("Final" if is_comp else time_str),
+                "is_completed": is_comp,
+                "went_to_ot": went_ot,
+                "period": 4 if went_ot else (3 if is_comp else 0),
+                "home_abbr": home_abbr,
+                "home_name": home_name,
+                "home_logo": get_team_logo_url(home_abbr),
+                "away_abbr": away_abbr,
+                "away_name": away_name,
+                "away_logo": get_team_logo_url(away_abbr),
+                "home_score": h_sc,
+                "away_score": a_sc,
+                "provider": "DraftKings / ESPN BET",
+                "has_live_odds": True,
+                "home_ml_dec": h_ml,
+                "away_ml_dec": a_ml,
+                "home_pl_line": h_pl_line,
+                "away_pl_line": -h_pl_line,
+                "home_pl_dec": h_pl_dec,
+                "away_pl_dec": a_pl_dec,
+                "total_line": tot_line,
+                "over_dec": ov_dec,
+                "under_dec": un_dec,
+            }
+        )
+    return demo_games

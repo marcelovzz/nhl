@@ -1,11 +1,13 @@
 """
 app_nhl.py
 Aplicación principal Streamlit — "TERMINAL SHARP: NHL QUANT".
-Integra:
+Interfaz visual idéntica a 'TERMINAL SHARP: NFL QUANT':
+- Configuración de página en ancho completo: st.set_page_config(layout="wide", page_title="TERMINAL SHARP: NHL QUANT").
+- Rejilla estricta de 3 columnas (col1, col2, col3 = st.columns(3)) formando una matriz limpia (3x3).
 - Carga automática con respaldo en disco ('nhl_stats.xlsx') y uploader opcional.
 - Selector de fecha diaria ('st.date_input') y botones rápidos [◀ Ayer] [Hoy] [Mañana ▶].
 - Pestañas: "🏒 Cartelera & Momios en Vivo" y "📈 Auditoría & Calibración".
-- Exportación de predicciones a Excel (.xlsx) en memoria mediante io.BytesIO.
+- Exportación de predicciones a Excel (.xlsx) con io.BytesIO.
 """
 
 import io
@@ -34,9 +36,9 @@ from styles_nhl import inject_cyberpunk_styles, render_game_card, render_header_
 from sync_espn_nhl import fetch_nhl_scoreboard, format_date_yyyymmdd, get_demo_slate
 
 st.set_page_config(
+    layout="wide",
     page_title="TERMINAL SHARP: NHL QUANT",
     page_icon="🏒",
-    layout="wide",
     initial_sidebar_state="expanded",
 )
 
@@ -79,7 +81,6 @@ def export_excel_bytes(predictions_df: pd.DataFrame, stats_df: pd.DataFrame) -> 
 
 
 def main() -> None:
-    # Inicializar estado de fecha seleccionada
     if "selected_date" not in st.session_state:
         st.session_state["selected_date"] = date.today()
 
@@ -90,10 +91,8 @@ def main() -> None:
         st.markdown("### ⚙️ CONTROL QUANT NHL")
         st.caption("Base de Datos de 32 Franquicias & Goalies")
 
-        disk_exists = os.path.exists(NHL_DEFAULT_FILENAME)
-        if not disk_exists:
+        if not os.path.exists(NHL_DEFAULT_FILENAME):
             ensure_nhl_stats_excel(NHL_DEFAULT_FILENAME)
-            disk_exists = True
 
         st.success(f"💾 Respaldo activo: `{NHL_DEFAULT_FILENAME}`")
 
@@ -106,7 +105,7 @@ def main() -> None:
         stats_df = load_team_stats(uploaded_excel)
 
         st.markdown("---")
-        st.markdown("### 🧮 PARÁMETROS DEL MOTOR")
+        st.markdown("### 🧮 PARÁMETROS PUCK-ENGINE")
         hfa_goals = st.slider(
             "Ventaja de Localía (HFA Goles)",
             min_value=0.00,
@@ -127,12 +126,12 @@ def main() -> None:
             max_value=10.0,
             value=2.0,
             step=0.5,
-            help="Porcentaje mínimo de Valor Esperado para encender el badge verde neón.",
+            help="Porcentaje mínimo de Valor Esperado para activar el badge verde neón.",
         )
         use_demo_if_empty = st.checkbox(
-            "Activar cartelera Demo si no hay juegos en la fecha",
+            "Activar cartelera Demo (3x3) si no hay juegos",
             value=True,
-            help="Muestra 4 partidos de prueba (2 pre-partido y 2 finalizados) cuando ESPN devuelve 0 juegos.",
+            help="Muestra 9 partidos de demostración en matriz 3x3 cuando ESPN devuelve 0 juegos en la fecha.",
         )
 
         with st.expander("🥅 Editar Porteros Titulares / Stats"):
@@ -208,7 +207,6 @@ def main() -> None:
 
     export_df = build_predictions_export_df(analyzed_games)
 
-    # Botón de exportación a Excel (.xlsx) en la barra superior
     with nav_col5:
         if not export_df.empty:
             excel_bytes = export_excel_bytes(export_df, stats_df)
@@ -220,7 +218,7 @@ def main() -> None:
                 use_container_width=True,
             )
 
-    total_sharp_signals = sum(len(g["positive_ev_signals"]) for g in analyzed_games)
+    total_sharp_signals = sum(1 for g in analyzed_games if g["best_bet"]["ev_pct"] >= ev_threshold)
     render_header_banner(
         date_label=active_date.strftime("%Y-%m-%d"),
         total_games=len(analyzed_games),
@@ -230,9 +228,9 @@ def main() -> None:
     if espn_data.get("error"):
         st.warning(f"⚠️ {espn_data['error']}")
     if is_demo_mode:
-        st.info(
-            f"ℹ️ ESPN no reporta partidos oficiales programados para `{date_yyyymmdd}`. "
-            "Visualizando **Cartelera Demo de Calibración** (puedes cambiar la fecha o desactivarla en la barra lateral)."
+        st.caption(
+            f"ℹ️ Sin juegos oficiales en ESPN para `{date_yyyymmdd}` — "
+            "Mostrando matriz 3x3 de calibración (puedes cambiar la fecha o desactivar el modo Demo en el panel lateral)."
         )
 
     # -------------------------------------------------------------------------
@@ -246,50 +244,27 @@ def main() -> None:
     )
 
     # =========================================================================
-    # PESTAÑA 1: CARTELERA & MOMIOS EN VIVO
+    # PESTAÑA 1: CARTELERA & MOMIOS EN VIVO (REJILLA ESTRICTA DE 3 COLUMNAS)
     # =========================================================================
     with tab_live:
         if not analyzed_games:
             st.warning("No se encontraron partidos para la fecha seleccionada.")
         else:
-            # KPIs rápidos de la jornada
-            kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-            avg_proj_goals = float(np.mean([g["proj_total_goals"] for g in analyzed_games]))
-            avg_ot_prob = float(np.mean([g["prob_ot_pct"] for g in analyzed_games]))
-            top_pick = max(analyzed_games, key=lambda x: x["best_bet"]["ev_pct"])["best_bet"]
+            # Renderizado en bloques de filas de 3 columnas estrictas (col1, col2, col3 = st.columns(3))
+            for row_start in range(0, len(analyzed_games), 3):
+                col1, col2, col3 = st.columns(3)
+                row_cols = (col1, col2, col3)
+                row_slice = analyzed_games[row_start : row_start + 3]
 
-            kpi1.metric("Partidos Analizados", f"{len(analyzed_games)}")
-            kpi2.metric("Promedio Goles Proy. (MC)", f"{avg_proj_goals:.2f} goles")
-            kpi3.metric("Prob. Media de Overtime (3v3)", f"{avg_ot_prob:.1f}%")
-            kpi4.metric(
-                "Mejor Oportunidad (+EV)",
-                f"{top_pick['selection']} ({top_pick['mkt_odds']:.2f})",
-                f"{top_pick['ev_pct']:+.2f}% EV",
-            )
+                for col_idx, game_item in enumerate(row_slice):
+                    with row_cols[col_idx]:
+                        render_game_card(
+                            game_item,
+                            hfa_goals=hfa_goals,
+                            ev_threshold=ev_threshold,
+                        )
 
-            st.markdown("#### 🎯 Tarjetas Cuantitativas por Partido")
-            for g in analyzed_games:
-                render_game_card(g, ev_threshold=ev_threshold)
-
-            with st.expander("📊 Desglose de Totales Alternativos (5.5 / 6.0 / 6.5) & Tabla Maestra"):
-                alt_rows = []
-                for g in analyzed_games:
-                    alt = g["alt_totals"]
-                    alt_rows.append(
-                        {
-                            "Partido": f"{g['away_abbr']} @ {g['home_abbr']}",
-                            "Total Proy MC": g["proj_total_goals"],
-                            "Over 5.5 (%)": alt[5.5]["p_over"],
-                            "Cuota Justa O5.5": alt[5.5]["fair_over"],
-                            "Over 6.0 (%)": alt[6.0]["p_over"],
-                            "Push 6.0 (%)": alt[6.0]["p_push"],
-                            "Cuota Justa O6.0": alt[6.0]["fair_over"],
-                            "Over 6.5 (%)": alt[6.5]["p_over"],
-                            "Cuota Justa O6.5": alt[6.5]["fair_over"],
-                        }
-                    )
-                st.dataframe(pd.DataFrame(alt_rows), use_container_width=True, hide_index=True)
-                st.markdown("##### 📋 Resumen Ejecutivo de Predicciones")
+            with st.expander("📊 Tabla Maestra de Cuotas Decimales & Líneas Alternativas (5.5 / 6.0 / 6.5)"):
                 st.dataframe(export_df, use_container_width=True, hide_index=True)
 
     # =========================================================================
@@ -307,11 +282,10 @@ def main() -> None:
         if not completed_games:
             st.info(
                 "🕒 Aún no hay partidos finalizados en la fecha seleccionada. "
-                "Usa el botón **◀ Ayer** para auditar resultados cerrados o activa la cartelera Demo."
+                "Usa el botón **◀ Ayer** para auditar resultados cerrados."
             )
         else:
             brier_scores = [g["audit"]["brier_score"] for g in completed_games]
-            log_losses = [g["audit"]["log_loss"] for g in completed_games]
             mae_totals = [g["audit"]["total_abs_error"] for g in completed_games]
             ml_hits = [1 if g["audit"]["ml_hit"] else 0 for g in completed_games]
             pnl_list = [g["audit"]["best_bet_pnl_u"] for g in completed_games]
@@ -319,7 +293,7 @@ def main() -> None:
             a_col1, a_col2, a_col3, a_col4, a_col5 = st.columns(5)
             a_col1.metric("Partidos Finalizados", f"{len(completed_games)}")
             a_col2.metric("Acierto Favorito ML", f"{np.mean(ml_hits) * 100:.1f}%")
-            a_col3.metric("Brier Score Medio", f"{np.mean(brier_scores):.4f}", help="Menor es mejor (0.25 es azar).")
+            a_col3.metric("Brier Score Medio", f"{np.mean(brier_scores):.4f}")
             a_col4.metric("MAE Total Goles", f"{np.mean(mae_totals):.2f} goles")
             a_col5.metric(
                 "PnL Picks Sharp (1u)",
@@ -335,7 +309,7 @@ def main() -> None:
                     {
                         "Partido": f"{g['away_abbr']} @ {g['home_abbr']}",
                         "Marcador Oficial": au["actual_score_str"],
-                        "Proyección Goles MC": f"{g['proj_away_goals']:.2f} - {g['proj_home_goals']:.2f} (Tot {g['proj_total_goals']:.2f})",
+                        "Proyección Puck-Engine": f"{g['away_abbr']} {g['proj_away_goals']:.1f} - {g['proj_home_goals']:.1f} {g['home_abbr']}",
                         "Prob. ML (Vis / Loc)": f"{g['prob_away_ml_pct']:.1f}% / {g['prob_home_ml_pct']:.1f}%",
                         "Pick Principal": f"{bb['selection']} @ {bb['mkt_odds']:.2f} ({bb['ev_pct']:+.1f}% EV)",
                         "Estado Pick": au["best_bet_status"],

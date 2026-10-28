@@ -1,208 +1,247 @@
 """
 styles_nhl.py
-Inyección de estilos CSS Dark Mode / Cyberpunk ("TERMINAL SHARP: NHL QUANT")
-y componentes HTML responsivos con badges verdes neón para señales +EV.
+Inyección de estilos CSS y renderizado de tarjetas idéntico a 'TERMINAL SHARP: NFL QUANT'.
+Diseñado para rejilla estricta de 3 columnas (3x3) con fondo '#0e1621', bordes cian/verde,
+marcadores proyectados en verde neón (#2bd99f / #00ffcc), bloque central Puck-Engine,
+badges de valor (#0f382c) y botón expandible inferior 'ANÁLISIS DETALLADO →'.
 """
 
 from typing import Any, Dict
 import streamlit as st
+from sync_espn_nhl import get_team_logo_url
 
 
 def inject_cyberpunk_styles() -> None:
-    """Inyecta la hoja de estilos Dark Mode / Cyberpunk en la aplicación Streamlit."""
+    """Inyecta la hoja de estilos Dark Mode idéntica a 'TERMINAL SHARP: NFL QUANT'."""
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;600;700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap');
 
         :root {
-            --bg-primary: #070b14;
-            --bg-card: #0d1424;
-            --bg-card-alt: #121c32;
-            --border-cyan: #00f0ff;
-            --neon-green: #00ff88;
-            --neon-amber: #ffb800;
-            --neon-red: #ff3366;
-            --text-main: #e6f1ff;
-            --text-muted: #8b9bb4;
+            --bg-app: #080c14;
+            --card-bg: #0e1621;
+            --card-bg-alt: #0d1117;
+            --border-neon: rgba(43, 217, 159, 0.35);
+            --border-cyan: rgba(0, 240, 255, 0.28);
+            --neon-score: #2bd99f;
+            --neon-bright: #00ffcc;
+            --ev-badge-bg: #0f382c;
+            --text-primary: #f0f6fc;
+            --text-secondary: #8b949e;
         }
 
         .stApp {
-            background: radial-gradient(circle at 15% 10%, #0f1b33 0%, #070b14 60%, #05070d 100%);
-            color: var(--text-main);
+            background-color: var(--bg-app);
+            background-image: radial-gradient(circle at 50% 0%, #111c2d 0%, #080c14 70%);
+            color: var(--text-primary);
             font-family: 'Inter', sans-serif;
         }
 
-        /* Header Cyber Terminal */
+        .block-container {
+            padding-top: 1.5rem !important;
+            padding-bottom: 2rem !important;
+            max-width: 98% !important;
+        }
+
+        /* Banner Superior Terminal Sharp */
         .terminal-banner {
-            background: linear-gradient(135deg, rgba(13, 20, 36, 0.95) 0%, rgba(9, 29, 52, 0.9) 100%);
-            border: 1px solid rgba(0, 240, 255, 0.35);
-            border-left: 5px solid #00f0ff;
-            border-radius: 12px;
-            padding: 18px 24px;
+            background: linear-gradient(180deg, #0e1621 0%, #0d1117 100%);
+            border: 1px solid rgba(43, 217, 159, 0.35);
+            border-left: 4px solid #2bd99f;
+            border-radius: 10px;
+            padding: 16px 22px;
             margin-bottom: 18px;
-            box-shadow: 0 0 25px rgba(0, 240, 255, 0.12);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.55);
         }
         .terminal-title {
             font-family: 'JetBrains Mono', monospace;
-            font-size: 1.65rem;
+            font-size: 1.55rem;
             font-weight: 800;
-            letter-spacing: 1.2px;
+            letter-spacing: 1px;
             color: #ffffff;
             margin: 0;
-            text-shadow: 0 0 12px rgba(0, 240, 255, 0.45);
         }
         .terminal-subtitle {
-            color: #8b9bb4;
-            font-size: 0.88rem;
+            color: #8b949e;
+            font-size: 0.82rem;
             margin-top: 4px;
             font-family: 'JetBrains Mono', monospace;
         }
 
-        /* Tarjetas responsivas de partido */
-        .nhl-game-card {
-            background: linear-gradient(180deg, rgba(16, 25, 46, 0.96) 0%, rgba(10, 16, 30, 0.98) 100%);
-            border: 1px solid rgba(0, 240, 255, 0.22);
-            border-radius: 12px;
-            padding: 18px 20px;
-            margin-bottom: 16px;
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
-            transition: transform 0.15s ease, border-color 0.15s ease;
-        }
-        .nhl-game-card:hover {
-            border-color: rgba(0, 255, 136, 0.55);
-            box-shadow: 0 8px 26px rgba(0, 255, 136, 0.12);
-        }
-
-        .card-top-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            padding-bottom: 10px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-
-        .matchup-heading {
-            font-size: 1.18rem;
-            font-weight: 800;
-            color: #ffffff;
-            letter-spacing: 0.4px;
-        }
-
-        .goalie-strip {
-            display: flex;
-            justify-content: space-between;
-            gap: 10px;
-            background: rgba(6, 11, 22, 0.75);
-            border: 1px solid rgba(255, 255, 255, 0.07);
-            border-radius: 8px;
-            padding: 8px 12px;
-            margin-bottom: 12px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.80rem;
-            color: #b8c7e0;
-            flex-wrap: wrap;
-        }
-
-        /* Grid de mercados dentro de la tarjeta */
-        .markets-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-            gap: 12px;
-            margin-top: 10px;
-        }
-
-        .market-box {
-            background: rgba(8, 13, 25, 0.85);
-            border: 1px solid rgba(0, 240, 255, 0.16);
-            border-radius: 9px;
-            padding: 11px 13px;
-        }
-        .market-box-title {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #00f0ff;
-            margin-bottom: 7px;
-            font-weight: 700;
-        }
-        .market-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 4px 0;
-            font-size: 0.84rem;
-            border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
-        }
-        .market-row:last-child {
+        /* Tarjeta de Partido idéntica a NFL QUANT */
+        .sharp-card {
+            background: linear-gradient(180deg, #0e1621 0%, #0d1117 100%);
+            border: 1px solid rgba(43, 217, 159, 0.32);
             border-bottom: none;
+            border-radius: 12px 12px 0 0;
+            padding: 16px 18px 14px 18px;
+            box-shadow: 0 6px 22px rgba(0, 0, 0, 0.6);
+            position: relative;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .sharp-card:hover {
+            border-color: #00ffcc;
+            box-shadow: 0 6px 25px rgba(0, 255, 204, 0.14);
         }
 
-        /* Badges verdes neón para señales +EV */
-        .badge-ev-plus {
-            display: inline-block;
-            background: rgba(0, 255, 136, 0.16);
-            color: #00ff88;
-            border: 1px solid #00ff88;
-            border-radius: 6px;
-            padding: 2px 8px;
+        /* Encabezado de tarjeta: Badge '🏒 NHL • FECHA' y hora */
+        .sharp-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        }
+        .nhl-date-badge {
+            background: rgba(0, 240, 255, 0.08);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            color: #00ffcc;
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.76rem;
+            font-size: 0.72rem;
             font-weight: 700;
-            box-shadow: 0 0 10px rgba(0, 255, 136, 0.25);
+            padding: 3px 9px;
+            border-radius: 5px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
         }
-
-        .badge-ev-neutral {
-            display: inline-block;
-            background: rgba(139, 155, 180, 0.12);
-            color: #9aa8c0;
-            border: 1px solid rgba(139, 155, 180, 0.3);
-            border-radius: 6px;
-            padding: 2px 8px;
+        .nhl-time-label {
+            color: #8b949e;
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.75rem;
-        }
-
-        .badge-status {
-            display: inline-block;
-            background: rgba(0, 240, 255, 0.12);
-            color: #00f0ff;
-            border: 1px solid rgba(0, 240, 255, 0.4);
-            border-radius: 6px;
-            padding: 2px 9px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 0.75rem;
+            font-size: 0.74rem;
             font-weight: 600;
         }
 
-        .sharp-signal-footer {
-            margin-top: 12px;
-            padding: 9px 14px;
-            border-radius: 8px;
-            background: linear-gradient(90deg, rgba(0, 255, 136, 0.14) 0%, rgba(0, 240, 255, 0.05) 100%);
-            border-left: 4px solid #00ff88;
+        /* Filas de Equipos (Logo + Nombre a la izquierda, Marcador Proyectado grande a la derecha) */
+        .teams-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .team-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            flex-wrap: wrap;
-            gap: 8px;
+        }
+        .team-info-left {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            min-width: 0;
+        }
+        .team-logo-img {
+            width: 34px;
+            height: 34px;
+            object-fit: contain;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
+            flex-shrink: 0;
+        }
+        .team-name-block {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.15;
+        }
+        .team-full-name {
+            color: #f0f6fc;
+            font-size: 0.98rem;
+            font-weight: 700;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .team-sub-meta {
+            color: #8b949e;
             font-family: 'JetBrains Mono', monospace;
-            font-size: 0.83rem;
+            font-size: 0.70rem;
+            margin-top: 2px;
+        }
+        .proj-score-right {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.75rem;
+            font-weight: 800;
+            color: #2bd99f;
+            text-shadow: 0 0 12px rgba(43, 217, 159, 0.35);
+            letter-spacing: -0.5px;
+            line-height: 1;
+            margin-left: 10px;
         }
 
-        .no-signal-footer {
-            margin-top: 12px;
-            padding: 8px 14px;
+        /* Bloque central de cuotas y proyección Puck-Engine */
+        .puck-engine-box {
+            background: rgba(13, 17, 23, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.07);
             border-radius: 8px;
-            background: rgba(255, 255, 255, 0.03);
-            border-left: 4px solid #4a5568;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+        .puck-engine-line1 {
+            color: #e6edf3;
             font-family: 'JetBrains Mono', monospace;
             font-size: 0.80rem;
-            color: #8b9bb4;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        .puck-engine-line2 {
+            color: #8b949e;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            font-weight: 500;
+        }
+
+        /* Badges de Valor (+EV) */
+        .ev-badge-positive {
+            background-color: #0f382c;
+            border: 1px solid #2bd99f;
+            color: #00ffcc;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
+            font-weight: 800;
+            text-align: center;
+            padding: 9px 10px;
+            border-radius: 7px;
+            letter-spacing: 0.4px;
+            box-shadow: inset 0 0 12px rgba(43, 217, 159, 0.18), 0 0 10px rgba(43, 217, 159, 0.15);
+            text-transform: uppercase;
+        }
+        .ev-badge-neutral {
+            background-color: rgba(22, 27, 34, 0.9);
+            border: 1px solid rgba(139, 148, 158, 0.25);
+            color: #8b949e;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.76rem;
+            font-weight: 700;
+            text-align: center;
+            padding: 9px 10px;
+            border-radius: 7px;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+        }
+
+        /* Estilizar el st.expander inferior 'ANÁLISIS DETALLADO →' acoplado a la tarjeta */
+        div[data-testid="stExpander"] {
+            background: #0d1117 !important;
+            border: 1px solid rgba(43, 217, 159, 0.32) !important;
+            border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+            border-radius: 0 0 12px 12px !important;
+            margin-top: -1rem !important;
+            margin-bottom: 18px !important;
+            overflow: hidden;
+        }
+        div[data-testid="stExpander"] details summary {
+            background: rgba(14, 22, 33, 0.95) !important;
+            color: #2bd99f !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 0.76rem !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.8px !important;
+            padding: 8px 14px !important;
+        }
+        div[data-testid="stExpander"] details summary:hover {
+            color: #00ffcc !important;
+            background: rgba(15, 56, 44, 0.45) !important;
         }
         </style>
         """,
@@ -210,16 +249,8 @@ def inject_cyberpunk_styles() -> None:
     )
 
 
-def format_ev_badge(ev_pct: float, threshold: float = 2.0) -> str:
-    """Devuelve un badge HTML verde neón si el EV supera el umbral, o neutro en caso contrario."""
-    sign = "+" if ev_pct > 0 else ""
-    if ev_pct >= threshold:
-        return f'<span class="badge-ev-plus">⚡ {sign}{ev_pct:.1f}% EV</span>'
-    return f'<span class="badge-ev-neutral">{sign}{ev_pct:.1f}% EV</span>'
-
-
 def render_header_banner(date_label: str, total_games: int, sharp_signals_count: int) -> None:
-    """Renderiza el encabezado principal estilo terminal cuantitativa."""
+    """Renderiza el encabezado superior de la terminal."""
     st.markdown(
         f"""
         <div class="terminal-banner">
@@ -227,13 +258,15 @@ def render_header_banner(date_label: str, total_games: int, sharp_signals_count:
                 <div>
                     <p class="terminal-title">🏒 TERMINAL SHARP: NHL QUANT</p>
                     <p class="terminal-subtitle">
-                        BIVARIATE POISSON / DIXON-COLES • 5,000 MONTE CARLO (3v3 OT + SO) • GOALIE SV% ADJUSTED
+                        PUCK-ENGINE BIVARIATE POISSON / DIXON-COLES • 5,000 MONTE CARLO (3v3 OT + SO) • GOALIE SV%
                     </p>
                 </div>
-                <div style="text-align:right; font-family:'JetBrains Mono', monospace;">
-                    <span class="badge-status">📅 FECHA: {date_label}</span>
-                    <span class="badge-status" style="margin-left:6px;">🎯 PARTIDOS: {total_games}</span>
-                    <span class="badge-ev-plus" style="margin-left:6px;">🔥 SEÑALES +EV: {sharp_signals_count}</span>
+                <div style="display:flex; gap:8px; align-items:center; font-family:'JetBrains Mono', monospace;">
+                    <span class="nhl-date-badge">📅 {date_label}</span>
+                    <span class="nhl-date-badge">🏒 PARTIDOS: {total_games}</span>
+                    <span class="nhl-date-badge" style="background:#0f382c; border-color:#2bd99f; color:#00ffcc;">
+                        🔥 +EV: {sharp_signals_count}
+                    </span>
                 </div>
             </div>
         </div>
@@ -242,109 +275,104 @@ def render_header_banner(date_label: str, total_games: int, sharp_signals_count:
     )
 
 
-def render_game_card(g: Dict[str, Any], ev_threshold: float = 2.0) -> None:
-    """Renderiza una tarjeta responsiva Cyberpunk para un partido analizado de la NHL."""
+def render_game_card(g: Dict[str, Any], hfa_goals: float = 0.28, ev_threshold: float = 2.0) -> None:
+    """
+    Renderiza la tarjeta individual de partido idéntica a 'TERMINAL SHARP: NFL QUANT',
+    seguida por el botón expandible 'ANÁLISIS DETALLADO →' ocupando todo el ancho de la tarjeta.
+    """
     away = g["away_abbr"]
     home = g["home_abbr"]
-    score_badge = ""
-    if g.get("home_score") is not None and g.get("away_score") is not None:
-        score_badge = f" • MARCADOR: {away} {g['away_score']} - {g['home_score']} {home}"
 
-    ev_away_ml_html = format_ev_badge(g["ev_away_ml"], ev_threshold)
-    ev_home_ml_html = format_ev_badge(g["ev_home_ml"], ev_threshold)
+    away_logo = g.get("away_logo") or get_team_logo_url(away)
+    home_logo = g.get("home_logo") or get_team_logo_url(home)
 
-    ev_away_pl_html = format_ev_badge(g["ev_away_pl"], ev_threshold)
-    ev_home_pl_html = format_ev_badge(g["ev_home_pl"], ev_threshold)
+    raw_date = str(g.get("date_yyyymmdd", ""))
+    if len(raw_date) == 8:
+        formatted_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
+    else:
+        formatted_date = raw_date
 
-    ev_over_html = format_ev_badge(g["ev_over"], ev_threshold)
-    ev_under_html = format_ev_badge(g["ev_under"], ev_threshold)
+    time_or_status = g.get("status_detail", "7:00 PM ET")
+    if g.get("is_completed") and g.get("home_score") is not None and g.get("away_score") is not None:
+        time_or_status = f"{time_or_status} ({away} {g['away_score']} - {g['home_score']} {home})"
+
+    proj_away = g["proj_away_goals"]
+    proj_home = g["proj_home_goals"]
+    proj_total = g["proj_total_goals"]
+
+    fair_away = g["fair_away_ml"]
+    fair_home = g["fair_home_ml"]
 
     bb = g["best_bet"]
     if bb["ev_pct"] >= ev_threshold:
-        footer_html = f"""
-        <div class="sharp-signal-footer">
-            <div>
-                <strong style="color:#00ff88;">🟢 SEÑAL SHARP DETECTADA:</strong>
-                <span style="color:#ffffff; font-weight:700; margin-left:6px;">{bb['selection']} ({bb['market']})</span>
-                <span style="color:#8b9bb4; margin-left:8px;">| Cuota Mkt: <b>{bb['mkt_odds']:.2f}</b> vs Justa: <b>{bb['fair_odds']:.2f}</b></span>
-            </div>
-            <div>
-                <span class="badge-ev-plus">+{bb['ev_pct']:.2f}% EV</span>
-                <span class="badge-status" style="margin-left:6px;">Kelly 1/4: {bb['kelly_pct']:.2f}%</span>
-            </div>
-        </div>
-        """
+        sel_upper = str(bb["selection"]).upper()
+        ev_badge_html = (
+            f'<div class="ev-badge-positive">'
+            f'🔥 VALOR: {sel_upper} ({bb["mkt_odds"]:.2f}) | EV: +{bb["ev_pct"]:.1f}%'
+            f"</div>"
+        )
     else:
-        footer_html = f"""
-        <div class="no-signal-footer">
-            ⚪ SIN SEÑAL +EV (&ge;{ev_threshold:.1f}%): Mejor línea relativa <b>{bb['selection']}</b>
-            (Cuota {bb['mkt_odds']:.2f} | Justa {bb['fair_odds']:.2f} | EV {bb['ev_pct']:+.2f}%)
-        </div>
-        """
+        ev_badge_html = '<div class="ev-badge-neutral">LÍNEA SIN VALOR</div>'
 
     card_html = f"""
-    <div class="nhl-game-card">
-        <div class="card-top-bar">
-            <div>
-                <span class="matchup-heading">{g['away_name']} ({away}) @ {g['home_name']} ({home})</span>
-                <div style="font-size:0.78rem; color:#8b9bb4; margin-top:2px;">
-                    🏟️ {g['venue']} • Proveedor: {g['provider']}
+    <div class="sharp-card">
+        <div class="sharp-card-header">
+            <span class="nhl-date-badge">🏒 NHL • {formatted_date}</span>
+            <span class="nhl-time-label">🕒 {time_or_status}</span>
+        </div>
+
+        <div class="teams-container">
+            <div class="team-row">
+                <div class="team-info-left">
+                    <img src="{away_logo}" class="team-logo-img" alt="{away}" onerror="this.style.display='none'"/>
+                    <div class="team-name-block">
+                        <span class="team-full-name">{g['away_name']}</span>
+                        <span class="team-sub-meta">{away} • 🥅 {g['away_goalie']} ({g['away_sv_pct']:.3f})</span>
+                    </div>
                 </div>
+                <div class="proj-score-right">{proj_away:.1f}</div>
             </div>
-            <div>
-                <span class="badge-status">{g['status_detail']}{score_badge}</span>
-                <span class="badge-status" style="margin-left:6px;">OT Prob: {g['prob_ot_pct']:.1f}%</span>
+
+            <div class="team-row">
+                <div class="team-info-left">
+                    <img src="{home_logo}" class="team-logo-img" alt="{home}" onerror="this.style.display='none'"/>
+                    <div class="team-name-block">
+                        <span class="team-full-name">{g['home_name']}</span>
+                        <span class="team-sub-meta">{home} • 🥅 {g['home_goalie']} ({g['home_sv_pct']:.3f})</span>
+                    </div>
+                </div>
+                <div class="proj-score-right">{proj_home:.1f}</div>
             </div>
         </div>
 
-        <div class="goalie-strip">
-            <div>🥅 <b>{away} Goalie:</b> {g['away_goalie']} (SV% {g['away_sv_pct']:.3f}) | <b>xG Reg:</b> {g['lambda_away_reg']:.2f} | <b>Proy MC:</b> {g['proj_away_goals']:.2f}</div>
-            <div>🥅 <b>{home} Goalie:</b> {g['home_goalie']} (SV% {g['home_sv_pct']:.3f}) | <b>xG Reg:</b> {g['lambda_home_reg']:.2f} | <b>Proy MC:</b> {g['proj_home_goals']:.2f}</div>
-            <div>⚡ <b>Total Proy (incl. OT/ENG):</b> <span style="color:#00f0ff; font-weight:700;">{g['proj_total_goals']:.2f} goles</span></div>
-        </div>
-
-        <div class="markets-grid">
-            <!-- MONEYLINE -->
-            <div class="market-box">
-                <div class="market-box-title">🏒 MONEYLINE (INC. 3v3 OT/SO)</div>
-                <div class="market-row">
-                    <span><b>{away} ML</b> ({g['prob_away_ml_pct']:.1f}%)</span>
-                    <span>Mkt: <b>{g['away_ml_dec']:.2f}</b> <small style="color:#8b9bb4;">(Justa {g['fair_away_ml']:.2f})</small> {ev_away_ml_html}</span>
-                </div>
-                <div class="market-row">
-                    <span><b>{home} ML</b> ({g['prob_home_ml_pct']:.1f}%)</span>
-                    <span>Mkt: <b>{g['home_ml_dec']:.2f}</b> <small style="color:#8b9bb4;">(Justa {g['fair_home_ml']:.2f})</small> {ev_home_ml_html}</span>
-                </div>
+        <div class="puck-engine-box">
+            <div class="puck-engine-line1">
+                Proyección Puck-Engine: {away} {proj_away:.1f} - {proj_home:.1f} {home}
             </div>
-
-            <!-- PUCK LINE -->
-            <div class="market-box">
-                <div class="market-box-title">🛡️ PUCK LINE (+1.5 / -1.5)</div>
-                <div class="market-row">
-                    <span><b>{away} {g['away_pl_line']:+.1f}</b> ({g['prob_away_pl_pct']:.1f}%)</span>
-                    <span>Mkt: <b>{g['away_pl_dec']:.2f}</b> <small style="color:#8b9bb4;">(Justa {g['fair_away_pl']:.2f})</small> {ev_away_pl_html}</span>
-                </div>
-                <div class="market-row">
-                    <span><b>{home} {g['home_pl_line']:+.1f}</b> ({g['prob_home_pl_pct']:.1f}%)</span>
-                    <span>Mkt: <b>{g['home_pl_dec']:.2f}</b> <small style="color:#8b9bb4;">(Justa {g['fair_home_pl']:.2f})</small> {ev_home_pl_html}</span>
-                </div>
-            </div>
-
-            <!-- TOTALES -->
-            <div class="market-box">
-                <div class="market-box-title">🚨 TOTAL GOLES (LÍNEA {g['total_line']:.1f})</div>
-                <div class="market-row">
-                    <span><b>Over {g['total_line']:.1f}</b> ({g['prob_over_pct']:.1f}%)</span>
-                    <span>Mkt: <b>{g['over_dec']:.2f}</b> <small style="color:#8b9bb4;">(Justa {g['fair_over']:.2f})</small> {ev_over_html}</span>
-                </div>
-                <div class="market-row">
-                    <span><b>Under {g['total_line']:.1f}</b> ({g['prob_under_pct']:.1f}%)</span>
-                    <span>Mkt: <b>{g['under_dec']:.2f}</b> <small style="color:#8b9bb4;">(Justa {g['fair_under']:.2f})</small> {ev_under_html}</span>
-                </div>
+            <div class="puck-engine-line2">
+                Cuota Justa ML: {away} {fair_away:.2f} | {home} {fair_home:.2f} &middot; Total Proy: {proj_total:.1f} &middot; HFA +{hfa_goals:.2f}
             </div>
         </div>
 
-        {footer_html}
+        {ev_badge_html}
     </div>
     """
     st.markdown(card_html, unsafe_allow_html=True)
+
+    with st.expander("ANÁLISIS DETALLADO →", expanded=False):
+        st.markdown(
+            f"""
+            **⚡ Simulación Monte Carlo ({g.get('prob_ot_pct', 0):.1f}% prob. 3v3 OT | {g.get('prob_so_pct', 0):.1f}% Shootout)**
+            - **Goles Esperados Regulación (60m):** `{away} {g['lambda_away_reg']:.2f}` vs `{home} {g['lambda_home_reg']:.2f}`
+            - **Moneyline (Sin Empate):**
+              - `{away} ML`: Prob **{g['prob_away_ml_pct']:.1f}%** | Justa **{g['fair_away_ml']:.2f}** | Mkt **{g['away_ml_dec']:.2f}** (`EV {g['ev_away_ml']:+.1f}%`)
+              - `{home} ML`: Prob **{g['prob_home_ml_pct']:.1f}%** | Justa **{g['fair_home_ml']:.2f}** | Mkt **{g['home_ml_dec']:.2f}** (`EV {g['ev_home_ml']:+.1f}%`)
+            - **Puck Line (+1.5 / -1.5):**
+              - `{away} {g['away_pl_line']:+.1f}`: Prob **{g['prob_away_pl_pct']:.1f}%** | Justa **{g['fair_away_pl']:.2f}** | Mkt **{g['away_pl_dec']:.2f}** (`EV {g['ev_away_pl']:+.1f}%`)
+              - `{home} {g['home_pl_line']:+.1f}`: Prob **{g['prob_home_pl_pct']:.1f}%** | Justa **{g['fair_home_pl']:.2f}** | Mkt **{g['home_pl_dec']:.2f}** (`EV {g['ev_home_pl']:+.1f}%`)
+            - **Totales (Línea {g['total_line']:.1f}):**
+              - `OVER {g['total_line']:.1f}`: Prob **{g['prob_over_pct']:.1f}%** | Justa **{g['fair_over']:.2f}** | Mkt **{g['over_dec']:.2f}** (`EV {g['ev_over']:+.1f}%`)
+              - `UNDER {g['total_line']:.1f}`: Prob **{g['prob_under_pct']:.1f}%** | Justa **{g['fair_under']:.2f}** | Mkt **{g['under_dec']:.2f}** (`EV {g['ev_under']:+.1f}%`)
+            - **Quarter-Kelly Stake Sugerido ({bb['selection']}):** `{bb['kelly_pct']:.2f}%` de banca
+            """
+        )
