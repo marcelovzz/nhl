@@ -6,14 +6,20 @@ Implementa:
    ajuste de ritmo (Pace_Events), ventaja de localía (HFA ~ +0.28 goles) y factor de Starting_Goalie (Save_Pct).
 2. Matriz analítica Bivariada de Poisson con ajuste de baja anotación Dixon-Coles (rho) para tiempo reglamentario (60 min).
 3. Simulación Monte Carlo (5,000 iteraciones) con resolución explícita de Tiempo Extra (3v3 OT) y Shootouts (SO)
-   para eliminar empates en Moneyline y modelar el gol extra de OT/SO en mercados de Totales y Puck Line.
-4. Cálculo de probabilidades justas, cuotas decimales justas y Valor Esperado (+EV%).
+   para eliminar empates en Moneyline y modelar el gol extra de OT/SO y Empty Net en mercados de Totales y Puck Line.
+4. Desglose cuantitativo completo:
+   - Moneyline: Probabilidad Modelo (%) vs Probabilidad Implícita Desvigilada (%) vs ESPN Hockey Predictor (%).
+   - Puck Line (+/-1.5): % exacto de cubrir para Favorito (-1.5) y Underdog (+1.5).
+   - Totales (Over/Under dinámico): % exacto de superar (Más de) o quedar debajo (Menos de) la línea.
+5. Exportación estructurada a Excel (.xlsx) mediante 'build_nhl_predictions_export_df' y 'export_nhl_excel_bytes'.
 """
 
+import io
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from scipy.stats import poisson
+from setup_data import write_xlsx_bytes
 
 # Parámetros globales de calibración NHL
 LEAGUE_AVG_GOALS_TEAM = 3.10
@@ -60,7 +66,6 @@ def build_bivariate_dixon_coles_matrix(
     p2 = poisson.pmf(np.arange(max_goals + 1), l2)
     p3 = poisson.pmf(np.arange(max_goals + 1), l3)
 
-    # Convolución bivariada de Poisson: X = X1 + X3, Y = X2 + X3
     matrix = np.zeros((max_goals + 1, max_goals + 1), dtype=float)
     for k in range(max_goals + 1):
         if p3[k] < 1e-9:
@@ -69,7 +74,6 @@ def build_bivariate_dixon_coles_matrix(
         sub_a = p2[: max_goals + 1 - k]
         matrix[k:, k:] += p3[k] * np.outer(sub_h, sub_a)
 
-    # Aplicar corrección Dixon-Coles en la esquina (0..1, 0..1)
     for i in (0, 1):
         for j in (0, 1):
             matrix[i, j] *= dixon_coles_tau(i, j, lam_home, lam_away, rho=rho)
@@ -92,34 +96,27 @@ def compute_expected_goals(
     integrando:
     - Fuerza ofensiva/defensiva híbrida (60% xG_Game + 40% Goals_Game)
     - Factor de ritmo (Pace_Events vs promedio NHL)
-    - HFA (~+0.28 goles repartidos en +0.14 al local y -0.14 al visitante)
+    - HFA (~+0.28 goles repartidos en +0.15 al local y -0.13 al visitante)
     - Ajuste por Starting_Goalie (Save_Pct relativo a la media de la liga .906)
     """
-    # Promedios de la liga dinámicos
     h_off = 0.60 * float(home_row["xGF_Game"]) + 0.40 * float(home_row["Goals_For_Game"])
     h_def = 0.60 * float(home_row["xGA_Game"]) + 0.40 * float(home_row["Goals_Against_Game"])
 
     a_off = 0.60 * float(away_row["xGF_Game"]) + 0.40 * float(away_row["Goals_For_Game"])
     a_def = 0.60 * float(away_row["xGA_Game"]) + 0.40 * float(away_row["Goals_Against_Game"])
 
-    # Factor de ritmo (Pace)
     match_pace = 0.5 * (float(home_row["Pace_Events"]) + float(away_row["Pace_Events"]))
     pace_multiplier = np.clip(match_pace / LEAGUE_AVG_PACE, 0.88, 1.14)
 
-    # Goles base cruzados (Ataque vs Defensa rival normalizado a media NHL)
     base_lam_home = ((h_off * a_def) / LEAGUE_AVG_GOALS_TEAM) * pace_multiplier
     base_lam_away = ((a_off * h_def) / LEAGUE_AVG_GOALS_TEAM) * pace_multiplier
 
-    # Ajuste por Starting_Goalie (Save_Pct vs media de liga 0.906)
-    # Un portero con .918 ahorra goles al rival; uno con .894 concede más.
     home_sv = float(home_row["Save_Pct"])
     away_sv = float(away_row["Save_Pct"])
 
-    # Multiplicador de goles permitidos según el portero rival
     away_goalie_factor = np.clip(1.0 - (away_sv - LEAGUE_AVG_SV_PCT) * goalie_weight, 0.78, 1.24)
     home_goalie_factor = np.clip(1.0 - (home_sv - LEAGUE_AVG_SV_PCT) * goalie_weight, 0.78, 1.24)
 
-    # Aplicar factor de portero y ventaja de localía (HFA ~ +0.28 goles diferenciales)
     lam_home = (base_lam_home * away_goalie_factor) + (hfa_goals * 0.55)
     lam_away = (base_lam_away * home_goalie_factor) - (hfa_goals * 0.45)
 
@@ -149,9 +146,9 @@ def run_monte_carlo_nhl(
     """
     Ejecuta simulación Monte Carlo (5,000 iteraciones por defecto) muestreando de la distribución
     conjunta Bivariada Poisson / Dixon-Coles en tiempo reglamentario (60 min) y resolviendo:
-    - Empates en regulación -> 5 minutos de 3v3 Overtime (~68% se decide en OT proporcional a fuerza ofensiva)
-    - Si persiste el empate tras 3v3 OT -> Shootout (SO, ~52% local / 48% visitante ajustado por Save_Pct).
-    En NHL, ganar en OT o SO otorga +1 gol oficial al marcador final del equipo ganador.
+    - Empates en regulación -> 5 minutos de 3v3 Overtime (~67% se decide en OT proporcional a fuerza ofensiva)
+    - Si persiste el empate tras 3v3 OT -> Shootout (SO, ~51.5% local / 48.5% visitante).
+    - Empty Net Goals (ENG) en los últimos 2 minutos cuando hay ventaja de 1 gol en regulación.
     """
     rng = np.random.default_rng(seed)
     max_goals = prob_matrix_reg.shape[0] - 1
@@ -174,7 +171,6 @@ def run_monte_carlo_nhl(
 
     if n_ties > 0:
         went_ot[ties_mask] = True
-        # En 3v3 OT, ~67% de los juegos empatados se resuelven antes del Shootout
         ot_resolution_prob = 0.67
         ot_home_share = np.clip(lam_home / (lam_home + lam_away), 0.38, 0.62)
         so_home_share = np.clip(0.515 + 0.15 * (ot_home_share - 0.5), 0.44, 0.58)
@@ -194,12 +190,10 @@ def run_monte_carlo_nhl(
             u_winner < so_home_share,
         )
 
-        # El ganador en OT o Shootout suma +1 gol en el boxscore oficial de NHL (relevante para Totales)
         final_home_goals[tie_indices[home_wins_tie]] += 1
         final_away_goals[tie_indices[~home_wins_tie]] += 1
 
-    # En Puck Line (-1.5 / +1.5), también modelamos Empty Net Goals en los últimos 2 minutos
-    # cuando un equipo gana por 1 gol en regulación (~22% de las ventajas de 1 gol en reg terminan en +2 por ENG)
+    # Modelado de Empty Net Goals (ENG) en ventajas de 1 gol en regulación
     reg_lead_home_1 = (reg_home_goals - reg_away_goals) == 1
     reg_lead_away_1 = (reg_away_goals - reg_home_goals) == 1
 
@@ -210,18 +204,16 @@ def run_monte_carlo_nhl(
     final_away_goals[eng_away] += 1
 
     total_goals = final_home_goals + final_away_goals
-    goal_diff = final_home_goals - final_away_goals  # >0 significa gana Local
+    goal_diff = final_home_goals - final_away_goals
 
     prob_home_ml = float(np.mean(goal_diff > 0))
     prob_away_ml = float(np.mean(goal_diff < 0))
 
-    # Asegurar que no existan empates en Moneyline
     if prob_home_ml + prob_away_ml > 0:
         norm = prob_home_ml + prob_away_ml
         prob_home_ml /= norm
         prob_away_ml /= norm
 
-    # Probabilidades de Puck Line
     prob_home_minus_1_5 = float(np.mean(goal_diff >= 2))
     prob_away_plus_1_5 = 1.0 - prob_home_minus_1_5
 
@@ -273,12 +265,21 @@ def fair_decimal_odds(prob: float) -> float:
     return round(1.0 / clamped, 3)
 
 
+def devig_market_probs(odds_a: float, odds_b: float) -> Tuple[float, float]:
+    """
+    Calcula la probabilidad implícita del mercado desvigilada (%) para dos resultados mutuamente excluyentes.
+    Retorna (prob_a_pct, prob_b_pct) en escala 0..100.
+    """
+    inv_a = 1.0 / max(1.01, float(odds_a))
+    inv_b = 1.0 / max(1.01, float(odds_b))
+    total_imp = inv_a + inv_b
+    if total_imp <= 0:
+        return 50.0, 50.0
+    return round((inv_a / total_imp) * 100.0, 1), round((inv_b / total_imp) * 100.0, 1)
+
+
 def calculate_ev_pct(fair_prob: float, market_decimal_odds: float, push_prob: float = 0.0) -> float:
-    """
-    Calcula el Valor Esperado porcentual (+EV%):
-    Si no hay Push: EV% = (P_win * Cuota_Decimal - 1) * 100
-    Si hay Push (ej. Total 6.0): EV% = (P_win_eff * (1 - P_push) * (Cuota_Decimal - 1) - P_loss_eff * (1 - P_push)) * 100
-    """
+    """Calcula el Valor Esperado porcentual (+EV%)."""
     if market_decimal_odds <= 1.0:
         return -100.0
     effective_ev = ((fair_prob * market_decimal_odds) - 1.0) * (1.0 - push_prob) * 100.0
@@ -305,57 +306,94 @@ def analyze_game(
     ev_threshold: float = 2.0,
 ) -> Dict[str, Any]:
     """
-    Ejecuta el pipeline cuantitativo completo para un partido de NHL y devuelve todas las métricas
-    de simulación, cuotas justas, +EV% en los 3 mercados (ML, Puck Line, Totales) y auditoría si finalizó.
+    Ejecuta las 5,000 simulaciones de Monte Carlo para un partido de NHL y devuelve:
+    - Moneyline: Modelo (%) vs Mercado Desvigilado (%) vs ESPN Hockey Predictor (%).
+    - Puck Line (+/-1.5): % exacto de cubrir la línea estándar para Favorito (-1.5) y Underdog (+1.5).
+    - Totales (Over/Under dinámico): % de superar o quedar por debajo de la línea.
+    - Señales +EV y auditoría post-partido.
     """
     stats_indexed = stats_df.set_index("Team_Abbr", drop=False)
 
     home_abbr = game["home_abbr"]
     away_abbr = game["away_abbr"]
 
-    # Fallback en caso de que un equipo especial no esté en la tabla
-    if home_abbr in stats_indexed.index:
-        home_row = stats_indexed.loc[home_abbr]
-    else:
-        home_row = stats_df.iloc[0]
-
-    if away_abbr in stats_indexed.index:
-        away_row = stats_indexed.loc[away_abbr]
-    else:
-        away_row = stats_df.iloc[1]
+    home_row = stats_indexed.loc[home_abbr] if home_abbr in stats_indexed.index else stats_df.iloc[0]
+    away_row = stats_indexed.loc[away_abbr] if away_abbr in stats_indexed.index else stats_df.iloc[1]
 
     xg_info = compute_expected_goals(home_row, away_row, hfa_goals=hfa_goals)
     lam_h = xg_info["lambda_home_reg"]
     lam_a = xg_info["lambda_away_reg"]
 
-    # Semilla determinista reproducible basada en el ID del partido + parámetros
     seed_val = abs(hash(f"{game.get('game_id')}_{lam_h:.3f}_{lam_a:.3f}_{n_sims}")) % (2**31 - 1)
 
     matrix_reg = build_bivariate_dixon_coles_matrix(lam_h, lam_a)
     mc = run_monte_carlo_nhl(matrix_reg, lam_h, lam_a, n_sims=n_sims, seed=seed_val)
 
-    # 1. Evaluación Moneyline
+    # 1. MONEYLINE: Modelo vs Mercado Desvigilado vs ESPN Predictor
     p_home_ml = mc["prob_home_ml"]
     p_away_ml = mc["prob_away_ml"]
+    prob_home_ml_pct = round(p_home_ml * 100.0, 1)
+    prob_away_ml_pct = round(p_away_ml * 100.0, 1)
+
     fair_home_ml = fair_decimal_odds(p_home_ml)
     fair_away_ml = fair_decimal_odds(p_away_ml)
 
     mkt_home_ml = float(game.get("home_ml_dec", fair_home_ml))
     mkt_away_ml = float(game.get("away_ml_dec", fair_away_ml))
 
+    mkt_home_ml_devig_pct, mkt_away_ml_devig_pct = devig_market_probs(mkt_home_ml, mkt_away_ml)
+
+    espn_home_wp_pct = float(game.get("espn_home_wp_pct", mkt_home_ml_devig_pct))
+    espn_away_wp_pct = float(game.get("espn_away_wp_pct", mkt_away_ml_devig_pct))
+
     ev_home_ml = calculate_ev_pct(p_home_ml, mkt_home_ml)
     ev_away_ml = calculate_ev_pct(p_away_ml, mkt_away_ml)
 
-    # 2. Evaluación Puck Line (+1.5 / -1.5)
+    # Equipo destacado en Moneyline (el que tenga mayor ventaja EV o el favorito del modelo)
+    if ev_home_ml >= ev_away_ml and ev_home_ml >= ev_threshold:
+        ml_focus_side = "home"
+    elif ev_away_ml > ev_home_ml and ev_away_ml >= ev_threshold:
+        ml_focus_side = "away"
+    else:
+        ml_focus_side = "home" if p_home_ml >= p_away_ml else "away"
+
+    if ml_focus_side == "home":
+        ml_focus_team = game.get("home_name", home_abbr)
+        ml_focus_abbr = home_abbr
+        ml_focus_model_pct = prob_home_ml_pct
+        ml_focus_mkt_pct = mkt_home_ml_devig_pct
+        ml_focus_espn_pct = espn_home_wp_pct
+        ml_focus_ev_pct = ev_home_ml
+    else:
+        ml_focus_team = game.get("away_name", away_abbr)
+        ml_focus_abbr = away_abbr
+        ml_focus_model_pct = prob_away_ml_pct
+        ml_focus_mkt_pct = mkt_away_ml_devig_pct
+        ml_focus_espn_pct = espn_away_wp_pct
+        ml_focus_ev_pct = ev_away_ml
+
+    # 2. PUCK LINE / HÁNDICAP (+/-1.5)
     home_pl_line = float(game.get("home_pl_line", -1.5))
     away_pl_line = float(game.get("away_pl_line", 1.5))
 
     if home_pl_line < 0:
         p_home_pl = mc["prob_home_minus_1_5"]
         p_away_pl = mc["prob_away_plus_1_5"]
+        fav_pl_abbr = home_abbr
+        fav_pl_name = game.get("home_name", home_abbr)
+        dog_pl_abbr = away_abbr
+        dog_pl_name = game.get("away_name", away_abbr)
+        fav_pl_cover_pct = round(p_home_pl * 100.0, 1)
+        dog_pl_cover_pct = round(p_away_pl * 100.0, 1)
     else:
         p_home_pl = mc["prob_home_plus_1_5"]
         p_away_pl = mc["prob_away_minus_1_5"]
+        fav_pl_abbr = away_abbr
+        fav_pl_name = game.get("away_name", away_abbr)
+        dog_pl_abbr = home_abbr
+        dog_pl_name = game.get("home_name", home_abbr)
+        fav_pl_cover_pct = round(p_away_pl * 100.0, 1)
+        dog_pl_cover_pct = round(p_home_pl * 100.0, 1)
 
     fair_home_pl = fair_decimal_odds(p_home_pl)
     fair_away_pl = fair_decimal_odds(p_away_pl)
@@ -366,9 +404,27 @@ def analyze_game(
     ev_home_pl = calculate_ev_pct(p_home_pl, mkt_home_pl)
     ev_away_pl = calculate_ev_pct(p_away_pl, mkt_away_pl)
 
-    # 3. Evaluación Totales (5.5 / 6.0 / 6.5)
+    # Lado de Puck Line con mayor valor esperado
+    if ev_home_pl >= ev_away_pl:
+        pl_focus_team = game.get("home_name", home_abbr)
+        pl_focus_abbr = home_abbr
+        pl_focus_line = home_pl_line
+        pl_focus_cover_pct = round(p_home_pl * 100.0, 1)
+        pl_focus_ev_pct = ev_home_pl
+    else:
+        pl_focus_team = game.get("away_name", away_abbr)
+        pl_focus_abbr = away_abbr
+        pl_focus_line = away_pl_line
+        pl_focus_cover_pct = round(p_away_pl * 100.0, 1)
+        pl_focus_ev_pct = ev_away_pl
+
+    # 3. TOTALES (Over/Under dinámico)
     total_line = float(game.get("total_line", 6.0))
     p_over, p_under, p_push = compute_total_market_probs(mc["total_goals"], total_line)
+
+    prob_over_pct = round(p_over * 100.0, 1)
+    prob_under_pct = round(p_under * 100.0, 1)
+    prob_push_pct = round(p_push * 100.0, 1)
 
     fair_over = fair_decimal_odds(p_over)
     fair_under = fair_decimal_odds(p_under)
@@ -379,24 +435,23 @@ def analyze_game(
     ev_over = calculate_ev_pct(p_over, mkt_over, push_prob=p_push)
     ev_under = calculate_ev_pct(p_under, mkt_under, push_prob=p_push)
 
-    # Además calculamos las líneas alternativas 5.5, 6.0 y 6.5 para el desglose cuantitativo
     alt_totals = {}
     for alt_l in (5.5, 6.0, 6.5):
         po, pu, pp = compute_total_market_probs(mc["total_goals"], alt_l)
         alt_totals[alt_l] = {
-            "p_over": round(po * 100, 1),
-            "p_under": round(pu * 100, 1),
-            "p_push": round(pp * 100, 1),
+            "p_over": round(po * 100.0, 1),
+            "p_under": round(pu * 100.0, 1),
+            "p_push": round(pp * 100.0, 1),
             "fair_over": fair_decimal_odds(po),
             "fair_under": fair_decimal_odds(pu),
         }
 
-    # Selección de mejores oportunidades (+EV Signals)
+    # 4. Candidatos y Detección de Señales +EV
     candidates = [
         {
             "market": "Moneyline",
             "selection": f"{away_abbr} ML",
-            "prob": round(p_away_ml * 100, 1),
+            "prob": prob_away_ml_pct,
             "fair_odds": fair_away_ml,
             "mkt_odds": mkt_away_ml,
             "ev_pct": ev_away_ml,
@@ -405,7 +460,7 @@ def analyze_game(
         {
             "market": "Moneyline",
             "selection": f"{home_abbr} ML",
-            "prob": round(p_home_ml * 100, 1),
+            "prob": prob_home_ml_pct,
             "fair_odds": fair_home_ml,
             "mkt_odds": mkt_home_ml,
             "ev_pct": ev_home_ml,
@@ -414,7 +469,7 @@ def analyze_game(
         {
             "market": "Puck Line",
             "selection": f"{away_abbr} {away_pl_line:+.1f}",
-            "prob": round(p_away_pl * 100, 1),
+            "prob": round(p_away_pl * 100.0, 1),
             "fair_odds": fair_away_pl,
             "mkt_odds": mkt_away_pl,
             "ev_pct": ev_away_pl,
@@ -423,7 +478,7 @@ def analyze_game(
         {
             "market": "Puck Line",
             "selection": f"{home_abbr} {home_pl_line:+.1f}",
-            "prob": round(p_home_pl * 100, 1),
+            "prob": round(p_home_pl * 100.0, 1),
             "fair_odds": fair_home_pl,
             "mkt_odds": mkt_home_pl,
             "ev_pct": ev_home_pl,
@@ -432,7 +487,7 @@ def analyze_game(
         {
             "market": "Total",
             "selection": f"Over {total_line}",
-            "prob": round(p_over * 100, 1),
+            "prob": prob_over_pct,
             "fair_odds": fair_over,
             "mkt_odds": mkt_over,
             "ev_pct": ev_over,
@@ -441,7 +496,7 @@ def analyze_game(
         {
             "market": "Total",
             "selection": f"Under {total_line}",
-            "prob": round(p_under * 100, 1),
+            "prob": prob_under_pct,
             "fair_odds": fair_under,
             "mkt_odds": mkt_under,
             "ev_pct": ev_under,
@@ -452,42 +507,63 @@ def analyze_game(
     best_bet = max(candidates, key=lambda c: c["ev_pct"])
     positive_ev_signals = [c for c in candidates if c["ev_pct"] >= ev_threshold]
 
-    # Auditoría post-partido si el partido ya finalizó
     audit = evaluate_post_game_audit(game, p_home_ml, p_away_ml, mc["proj_total_goals_final"], best_bet)
 
     return {
         **game,
         **xg_info,
-        "prob_reg_tie_pct": round(mc["prob_reg_tie"] * 100, 1),
-        "prob_ot_pct": round(mc["prob_ot"] * 100, 1),
-        "prob_so_pct": round(mc["prob_so"] * 100, 1),
+        "n_sims": n_sims,
+        "prob_reg_tie_pct": round(mc["prob_reg_tie"] * 100.0, 1),
+        "prob_ot_pct": round(mc["prob_ot"] * 100.0, 1),
+        "prob_so_pct": round(mc["prob_so"] * 100.0, 1),
         "proj_home_goals": round(mc["proj_home_goals_final"], 2),
         "proj_away_goals": round(mc["proj_away_goals_final"], 2),
         "proj_total_goals": round(mc["proj_total_goals_final"], 2),
-        # Moneyline
-        "prob_home_ml_pct": round(p_home_ml * 100, 1),
-        "prob_away_ml_pct": round(p_away_ml * 100, 1),
+        # Moneyline & Comparativa Modelo vs Casas vs ESPN
+        "prob_home_ml_pct": prob_home_ml_pct,
+        "prob_away_ml_pct": prob_away_ml_pct,
+        "mkt_home_ml_devig_pct": mkt_home_ml_devig_pct,
+        "mkt_away_ml_devig_pct": mkt_away_ml_devig_pct,
+        "espn_home_wp_pct": espn_home_wp_pct,
+        "espn_away_wp_pct": espn_away_wp_pct,
         "fair_home_ml": fair_home_ml,
         "fair_away_ml": fair_away_ml,
         "ev_home_ml": ev_home_ml,
         "ev_away_ml": ev_away_ml,
-        # Puck Line
-        "prob_home_pl_pct": round(p_home_pl * 100, 1),
-        "prob_away_pl_pct": round(p_away_pl * 100, 1),
+        "ml_focus_team": ml_focus_team,
+        "ml_focus_abbr": ml_focus_abbr,
+        "ml_focus_model_pct": ml_focus_model_pct,
+        "ml_focus_mkt_pct": ml_focus_mkt_pct,
+        "ml_focus_espn_pct": ml_focus_espn_pct,
+        "ml_focus_ev_pct": ml_focus_ev_pct,
+        # Puck Line (+/-1.5)
+        "prob_home_pl_pct": round(p_home_pl * 100.0, 1),
+        "prob_away_pl_pct": round(p_away_pl * 100.0, 1),
         "fair_home_pl": fair_home_pl,
         "fair_away_pl": fair_away_pl,
         "ev_home_pl": ev_home_pl,
         "ev_away_pl": ev_away_pl,
+        "fav_pl_abbr": fav_pl_abbr,
+        "fav_pl_name": fav_pl_name,
+        "fav_pl_cover_pct": fav_pl_cover_pct,
+        "dog_pl_abbr": dog_pl_abbr,
+        "dog_pl_name": dog_pl_name,
+        "dog_pl_cover_pct": dog_pl_cover_pct,
+        "pl_focus_team": pl_focus_team,
+        "pl_focus_abbr": pl_focus_abbr,
+        "pl_focus_line": pl_focus_line,
+        "pl_focus_cover_pct": pl_focus_cover_pct,
+        "pl_focus_ev_pct": pl_focus_ev_pct,
         # Totales
-        "prob_over_pct": round(p_over * 100, 1),
-        "prob_under_pct": round(p_under * 100, 1),
-        "prob_push_pct": round(p_push * 100, 1),
+        "prob_over_pct": prob_over_pct,
+        "prob_under_pct": prob_under_pct,
+        "prob_push_pct": prob_push_pct,
         "fair_over": fair_over,
         "fair_under": fair_under,
         "ev_over": ev_over,
         "ev_under": ev_under,
         "alt_totals": alt_totals,
-        # Señales Sharp
+        # Señales Sharp & Auditoría
         "best_bet": best_bet,
         "positive_ev_signals": positive_ev_signals,
         "audit": audit,
@@ -516,7 +592,6 @@ def evaluate_post_game_audit(
     actual_total = h_score + a_score
     home_won = 1.0 if h_score > a_score else 0.0
 
-    # Brier Score & Log-Loss
     brier = (p_home_ml - home_won) ** 2
     eps = 1e-6
     p_win_actual = p_home_ml if home_won == 1.0 else p_away_ml
@@ -526,7 +601,6 @@ def evaluate_post_game_audit(
     ml_hit = (model_fav_home and h_score > a_score) or ((not model_fav_home) and a_score > h_score)
     total_abs_error = abs(actual_total - proj_total)
 
-    # Evaluar si el best_bet ganó
     sel = best_bet["selection"]
     mkt_odds = float(best_bet["mkt_odds"])
     home_abbr = game["home_abbr"]
@@ -582,52 +656,46 @@ def evaluate_post_game_audit(
     }
 
 
-def build_predictions_export_df(analyzed_games: List[Dict[str, Any]]) -> pd.DataFrame:
+def build_nhl_predictions_export_df(results_list: List[Dict[str, Any]]) -> pd.DataFrame:
     """
-    Construye un DataFrame tabular limpio con todas las proyecciones, cuotas justas, cuotas de mercado y +EV%
-    listo para descargarse en formato Excel (.xlsx).
+    Estructura la tabla de exportación de las 5,000 simulaciones Monte Carlo con:
+    - Fecha/Hora, Visita, Local, Marcador Proyectado (xG)
+    - ML Visita %, ML Local %, Cuota Justa ML, Mercado ML %
+    - Puck Line (-1.5 / +1.5), % Cubrir Favorito, % Cubrir Underdog
+    - Total Mercado (O/U ej. 5.5 / 6.0 / 6.5), % Over, % Under
+    - Edge / EV% detectado
     """
     rows = []
-    for g in analyzed_games:
+    for g in results_list:
         bb = g["best_bet"]
         audit = g.get("audit", {})
+        raw_date = str(g.get("date_yyyymmdd", ""))
+        fmt_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}" if len(raw_date) == 8 else raw_date
+        edge_str = (
+            f"{bb['selection']} ({bb['mkt_odds']:.2f}) | EV: {bb['ev_pct']:+.1f}%"
+            if bb["ev_pct"] >= 2.0
+            else f"SIN EDGE (Max: {bb['selection']} {bb['ev_pct']:+.1f}%)"
+        )
+
         rows.append(
             {
-                "Fecha": g["date_yyyymmdd"],
-                "Estado": g["status_detail"],
-                "Visitante": g["away_abbr"],
-                "Goalie_Vis": f"{g['away_goalie']} ({g['away_sv_pct']:.3f})",
-                "Local": g["home_abbr"],
-                "Goalie_Loc": f"{g['home_goalie']} ({g['home_sv_pct']:.3f})",
-                "xG_Reg_Vis": g["lambda_away_reg"],
-                "xG_Reg_Loc": g["lambda_home_reg"],
-                "Goles_Proy_Vis": g["proj_away_goals"],
-                "Goles_Proy_Loc": g["proj_home_goals"],
-                "Total_Proy_MC": g["proj_total_goals"],
-                "Prob_OT_%": g["prob_ot_pct"],
-                "Prob_Vis_ML_%": g["prob_away_ml_pct"],
-                "Prob_Loc_ML_%": g["prob_home_ml_pct"],
-                "Cuota_Justa_Vis_ML": g["fair_away_ml"],
-                "Cuota_Justa_Loc_ML": g["fair_home_ml"],
-                "Momio_Mkt_Vis_ML": g["away_ml_dec"],
-                "Momio_Mkt_Loc_ML": g["home_ml_dec"],
-                "EV_Vis_ML_%": g["ev_away_ml"],
-                "EV_Loc_ML_%": g["ev_home_ml"],
-                "Linea_PL_Loc": g["home_pl_line"],
-                "Prob_Loc_PL_%": g["prob_home_pl_pct"],
-                "Momio_Mkt_Loc_PL": g["home_pl_dec"],
-                "EV_Loc_PL_%": g["ev_home_pl"],
-                "Linea_Total": g["total_line"],
-                "Prob_Over_%": g["prob_over_pct"],
-                "Momio_Mkt_Over": g["over_dec"],
-                "EV_Over_%": g["ev_over"],
-                "Prob_Under_%": g["prob_under_pct"],
-                "Momio_Mkt_Under": g["under_dec"],
-                "EV_Under_%": g["ev_under"],
-                "Mejor_Pick_Sharp": bb["selection"],
-                "Mercado_Pick": bb["market"],
-                "Cuota_Pick_Dec": bb["mkt_odds"],
-                "EV_Pick_%": bb["ev_pct"],
+                "Fecha/Hora": f"{fmt_date} • {g.get('status_detail', '')}",
+                "Visita": f"{g['away_name']} ({g['away_abbr']})",
+                "Local": f"{g['home_name']} ({g['home_abbr']})",
+                "Marcador Proyectado (xG)": f"{g['away_abbr']} {g['proj_away_goals']:.1f} - {g['proj_home_goals']:.1f} {g['home_abbr']} (Tot: {g['proj_total_goals']:.1f})",
+                "ML Visita %": g["prob_away_ml_pct"],
+                "ML Local %": g["prob_home_ml_pct"],
+                "Cuota Justa ML": f"{g['away_abbr']} {g['fair_away_ml']:.2f} | {g['home_abbr']} {g['fair_home_ml']:.2f}",
+                "Mercado ML %": f"{g['away_abbr']} {g['mkt_away_ml_devig_pct']:.1f}% | {g['home_abbr']} {g['mkt_home_ml_devig_pct']:.1f}%",
+                "ESPN Predictor %": f"{g['away_abbr']} {g['espn_away_wp_pct']:.1f}% | {g['home_abbr']} {g['espn_home_wp_pct']:.1f}%",
+                "Puck Line (-1.5 / +1.5)": f"{g['fav_pl_abbr']} -1.5 / {g['dog_pl_abbr']} +1.5",
+                "% Cubrir Favorito": g["fav_pl_cover_pct"],
+                "% Cubrir Underdog": g["dog_pl_cover_pct"],
+                "Total Mercado (O/U)": g["total_line"],
+                "% Over": g["prob_over_pct"],
+                "% Under": g["prob_under_pct"],
+                "Edge / EV% detectado": edge_str,
+                "EV_Max_%": bb["ev_pct"],
                 "Stake_Kelly_%": bb["kelly_pct"],
                 "Marcador_Final": audit.get("actual_score_str", "Pendiente"),
                 "Resultado_Pick": audit.get("best_bet_status", "N/A"),
@@ -636,3 +704,31 @@ def build_predictions_export_df(analyzed_games: List[Dict[str, Any]]) -> pd.Data
             }
         )
     return pd.DataFrame(rows)
+
+
+def build_predictions_export_df(analyzed_games: List[Dict[str, Any]]) -> pd.DataFrame:
+    """Alias compatible con versiones previas que invoca build_nhl_predictions_export_df."""
+    return build_nhl_predictions_export_df(analyzed_games)
+
+
+def export_nhl_excel_bytes(df: pd.DataFrame, stats_df: Optional[pd.DataFrame] = None) -> io.BytesIO:
+    """
+    Genera el archivo Excel (.xlsx) en un buffer io.BytesIO usando openpyxl
+    (con respaldo OpenXML integrado si openpyxl aún no está cargado en el entorno).
+    """
+    sheets: Dict[str, pd.DataFrame] = {"Predicciones_NHL_5000MC": df}
+    if stats_df is not None:
+        sheets["NHL_Stats_32_Teams"] = stats_df
+
+    try:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            for sheet_name, sheet_df in sheets.items():
+                sheet_df.to_excel(writer, index=False, sheet_name=sheet_name[:31])
+        output.seek(0)
+        return output
+    except ImportError:
+        raw_bytes = write_xlsx_bytes(sheets)
+        output = io.BytesIO(raw_bytes)
+        output.seek(0)
+        return output

@@ -1,14 +1,14 @@
 """
 app_nhl.py
 Aplicación principal Streamlit — "TERMINAL SHARP: NHL QUANT".
-Interfaz visual idéntica a 'TERMINAL SHARP: NFL QUANT':
+Interfaz visual idéntica a los módulos de NFL y NBA:
 - Configuración de página en ancho completo: st.set_page_config(layout="wide", page_title="TERMINAL SHARP: NHL QUANT").
-- Rejilla estricta de 3 columnas (col1, col2, col3 = st.columns(3)) formando una matriz limpia (3x3).
-- Todas las llamadas a st.markdown() que renderizan tarjetas HTML incluyen explícitamente unsafe_allow_html=True
-  y strings HTML sin indentación de 4 espacios para evitar bloques de código Markdown.
+- Rejilla estricta de 3 columnas (col1, col2, col3 = st.columns(3)) con tarjetas simétricas (min-height: 560px)
+  y botón 'LEER ANÁLISIS →' perfectamente alineado.
+- Desglose de 5,000 simulaciones Monte Carlo por partido (Moneyline vs Casas vs ESPN, Puck Line +/-1.5, Total O/U).
+- Exportación a Excel (.xlsx) mediante build_nhl_predictions_export_df y export_nhl_excel_bytes.
 """
 
-import io
 import os
 from datetime import date, timedelta
 from typing import Any, Dict, List
@@ -21,7 +21,8 @@ from engine_nhl import (
     DEFAULT_HFA_GOALS,
     DEFAULT_MC_ITERATIONS,
     analyze_game,
-    build_predictions_export_df,
+    build_nhl_predictions_export_df,
+    export_nhl_excel_bytes,
 )
 from setup_data import (
     COLUMNS as REQUIRED_COLUMNS,
@@ -31,9 +32,9 @@ from setup_data import (
     write_xlsx_bytes,
 )
 from styles_nhl import (
-    build_game_card_html,
     build_header_banner_html,
     inject_cyberpunk_styles,
+    render_game_card,
 )
 from sync_espn_nhl import fetch_nhl_scoreboard, format_date_yyyymmdd, get_demo_slate
 
@@ -66,50 +67,6 @@ def load_team_stats(uploaded_file: Any = None) -> pd.DataFrame:
         ensure_nhl_stats_excel(NHL_DEFAULT_FILENAME)
 
     return read_excel_safe(NHL_DEFAULT_FILENAME)
-
-
-def export_excel_bytes(predictions_df: pd.DataFrame, stats_df: pd.DataFrame) -> bytes:
-    """Genera un archivo Excel (.xlsx) en memoria con io.BytesIO incluyendo Predicciones y Base de Equipos."""
-    buffer = io.BytesIO(
-        write_xlsx_bytes(
-            {
-                "Predicciones_NHL_Quant": predictions_df,
-                "NHL_Stats_32_Teams": stats_df,
-            }
-        )
-    )
-    buffer.seek(0)
-    return buffer.getvalue()
-
-
-def render_card_in_column(g: Dict[str, Any], hfa_goals: float, ev_threshold: float) -> None:
-    """
-    Imprime el bloque HTML de la tarjeta del partido en Streamlit con unsafe_allow_html=True
-    y sin indentaciones de 4 espacios, seguido del expander de análisis detallado.
-    """
-    card_html = build_game_card_html(g, hfa_goals=hfa_goals, ev_threshold=ev_threshold)
-    st.markdown(card_html, unsafe_allow_html=True)
-
-    away = g["away_abbr"]
-    home = g["home_abbr"]
-    bb = g["best_bet"]
-
-    with st.expander("ANÁLISIS DETALLADO →", expanded=False):
-        detail_lines = [
-            f"<div><b>⚡ Simulación Monte Carlo ({g.get('prob_ot_pct', 0):.1f}% prob. 3v3 OT | {g.get('prob_so_pct', 0):.1f}% Shootout)</b></div>",
-            f"<div>• <b>Goles Esperados Regulación (60m):</b> <code>{away} {g['lambda_away_reg']:.2f}</code> vs <code>{home} {g['lambda_home_reg']:.2f}</code></div>",
-            f"<div>• <b>Moneyline (Sin Empate):</b></div>",
-            f"<div>&nbsp;&nbsp;◦ <code>{away} ML</code>: Prob <b>{g['prob_away_ml_pct']:.1f}%</b> | Justa <b>{g['fair_away_ml']:.2f}</b> | Mkt <b>{g['away_ml_dec']:.2f}</b> (<code>EV {g['ev_away_ml']:+.1f}%</code>)</div>",
-            f"<div>&nbsp;&nbsp;◦ <code>{home} ML</code>: Prob <b>{g['prob_home_ml_pct']:.1f}%</b> | Justa <b>{g['fair_home_ml']:.2f}</b> | Mkt <b>{g['home_ml_dec']:.2f}</b> (<code>EV {g['ev_home_ml']:+.1f}%</code>)</div>",
-            f"<div>• <b>Puck Line (+1.5 / -1.5):</b></div>",
-            f"<div>&nbsp;&nbsp;◦ <code>{away} {g['away_pl_line']:+.1f}</code>: Prob <b>{g['prob_away_pl_pct']:.1f}%</b> | Justa <b>{g['fair_away_pl']:.2f}</b> | Mkt <b>{g['away_pl_dec']:.2f}</b> (<code>EV {g['ev_away_pl']:+.1f}%</code>)</div>",
-            f"<div>&nbsp;&nbsp;◦ <code>{home} {g['home_pl_line']:+.1f}</code>: Prob <b>{g['prob_home_pl_pct']:.1f}%</b> | Justa <b>{g['fair_home_pl']:.2f}</b> | Mkt <b>{g['home_pl_dec']:.2f}</b> (<code>EV {g['ev_home_pl']:+.1f}%</code>)</div>",
-            f"<div>• <b>Totales (Línea {g['total_line']:.1f}):</b></div>",
-            f"<div>&nbsp;&nbsp;◦ <code>OVER {g['total_line']:.1f}</code>: Prob <b>{g['prob_over_pct']:.1f}%</b> | Justa <b>{g['fair_over']:.2f}</b> | Mkt <b>{g['over_dec']:.2f}</b> (<code>EV {g['ev_over']:+.1f}%</code>)</div>",
-            f"<div>&nbsp;&nbsp;◦ <code>UNDER {g['total_line']:.1f}</code>: Prob <b>{g['prob_under_pct']:.1f}%</b> | Justa <b>{g['fair_under']:.2f}</b> | Mkt <b>{g['under_dec']:.2f}</b> (<code>EV {g['ev_under']:+.1f}%</code>)</div>",
-            f"<div>• <b>Quarter-Kelly Stake Sugerido ({bb['selection']}):</b> <code>{bb['kelly_pct']:.2f}%</code> de banca</div>",
-        ]
-        st.markdown("\n".join(detail_lines), unsafe_allow_html=True)
 
 
 def main() -> None:
@@ -158,7 +115,7 @@ def main() -> None:
             max_value=10.0,
             value=2.0,
             step=0.5,
-            help="Porcentaje mínimo de Valor Esperado para activar el badge verde neón.",
+            help="Porcentaje mínimo de Valor Esperado para resaltar en verde neón (#00ffcc).",
         )
         use_demo_if_empty = st.checkbox(
             "Activar cartelera Demo (3x3) si no hay juegos",
@@ -181,7 +138,7 @@ def main() -> None:
             stats_df = edited_stats_df
 
     # -------------------------------------------------------------------------
-    # NAVEGACIÓN DE FECHA: [◀ Ayer] [Hoy] [Mañana ▶] + st.date_input
+    # NAVEGACIÓN SUPERIOR: [◀ Ayer] [Hoy] [Mañana ▶] + Fecha + Descarga Excel
     # -------------------------------------------------------------------------
     nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([1.1, 1.1, 1.1, 2.2, 2.5])
 
@@ -214,9 +171,9 @@ def main() -> None:
     date_yyyymmdd = format_date_yyyymmdd(active_date)
 
     # -------------------------------------------------------------------------
-    # INGESTA DE DATOS ESPN + EJECUCIÓN DEL MOTOR CUANTITATIVO
+    # INGESTA DE DATOS ESPN + 5,000 SIMULACIONES MONTE CARLO POR PARTIDO
     # -------------------------------------------------------------------------
-    with st.spinner(f"Sincronizando cartelera y momios NHL con ESPN ({date_yyyymmdd})..."):
+    with st.spinner(f"Ejecutando {mc_sims:,} simulaciones Monte Carlo por partido ({date_yyyymmdd})..."):
         espn_data = fetch_nhl_scoreboard(active_date)
 
     raw_games = espn_data.get("games", [])
@@ -237,15 +194,15 @@ def main() -> None:
         for g in raw_games
     ]
 
-    export_df = build_predictions_export_df(analyzed_games)
+    export_df = build_nhl_predictions_export_df(analyzed_games)
 
     with nav_col5:
         if not export_df.empty:
-            excel_bytes = export_excel_bytes(export_df, stats_df)
+            excel_io = export_nhl_excel_bytes(export_df, stats_df=stats_df)
             st.download_button(
-                label="📥 Exportar Predicciones (.xlsx)",
-                data=excel_bytes,
-                file_name=f"nhl_quant_sharp_{date_yyyymmdd}.xlsx",
+                label="📥 Exportar Predicciones NHL (.xlsx)",
+                data=excel_io.getvalue(),
+                file_name=f"nhl_quant_monte_carlo_{date_yyyymmdd}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
             )
@@ -263,7 +220,7 @@ def main() -> None:
     if is_demo_mode:
         st.caption(
             f"ℹ️ Sin juegos oficiales en ESPN para `{date_yyyymmdd}` — "
-            "Mostrando matriz 3x3 de calibración (puedes cambiar la fecha o desactivar el modo Demo en el panel lateral)."
+            "Mostrando matriz 3x3 de calibración con 5,000 simulaciones Monte Carlo por partido."
         )
 
     # -------------------------------------------------------------------------
@@ -290,13 +247,13 @@ def main() -> None:
 
                 for col_idx, game_item in enumerate(row_slice):
                     with row_cols[col_idx]:
-                        render_card_in_column(
+                        render_game_card(
                             game_item,
                             hfa_goals=hfa_goals,
                             ev_threshold=ev_threshold,
                         )
 
-            with st.expander("📊 Tabla Maestra de Cuotas Decimales & Líneas Alternativas (5.5 / 6.0 / 6.5)"):
+            with st.expander("📊 Tabla Maestra de Simulaciones Monte Carlo & Exportación (.xlsx)"):
                 st.dataframe(export_df, use_container_width=True, hide_index=True)
 
     # =========================================================================
