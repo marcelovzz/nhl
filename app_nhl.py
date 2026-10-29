@@ -240,18 +240,98 @@ def main() -> None:
         if not analyzed_games:
             st.warning("No se encontraron partidos para la fecha seleccionada.")
         else:
-            for row_start in range(0, len(analyzed_games), 3):
-                col1, col2, col3 = st.columns(3)
-                row_cols = (col1, col2, col3)
-                row_slice = analyzed_games[row_start : row_start + 3]
+            filter_col1, filter_col2 = st.columns(2)
+            with filter_col1:
+                market_filter = st.selectbox(
+                    "🎯 Filtrar Mercados",
+                    options=[
+                        "Todos los partidos",
+                        "Solo +EV Activo",
+                        "Solo Puck Lines",
+                        "Solo Totales",
+                    ],
+                    index=0,
+                )
+            with filter_col2:
+                sort_option = st.selectbox(
+                    "🔃 Ordenar Cartelera",
+                    options=[
+                        "Predeterminado (Horario)",
+                        "Mayor Probabilidad de Ganar ML",
+                        "Mayor Probabilidad de Cubrir Puck Line",
+                        "Mayor Probabilidad de Over",
+                        "Mayor Probabilidad de Under",
+                        "Mayor Valor Esperado (+EV %)",
+                    ],
+                    index=0,
+                )
 
-                for col_idx, game_item in enumerate(row_slice):
-                    with row_cols[col_idx]:
-                        render_game_card(
-                            game_item,
-                            hfa_goals=hfa_goals,
-                            ev_threshold=ev_threshold,
-                        )
+            # 1. Aplicar filtrado sobre la lista de partidos analizados
+            filtered_games: List[Dict[str, Any]] = list(analyzed_games)
+            if market_filter == "Solo +EV Activo":
+                filtered_games = [
+                    g for g in filtered_games if g["best_bet"]["ev_pct"] >= ev_threshold
+                ]
+            elif market_filter == "Solo Puck Lines":
+                filtered_games = [
+                    g
+                    for g in filtered_games
+                    if g["best_bet"]["market"] == "Puck Line"
+                    or max(g["ev_home_pl"], g["ev_away_pl"]) >= ev_threshold
+                ]
+            elif market_filter == "Solo Totales":
+                filtered_games = [
+                    g
+                    for g in filtered_games
+                    if g["best_bet"]["market"] == "Total"
+                    or max(g["ev_over"], g["ev_under"]) >= ev_threshold
+                ]
+
+            # 2. Aplicar ordenamiento seleccionado antes de renderizar la cuadrícula 3x3
+            if sort_option == "Mayor Probabilidad de Ganar ML":
+                filtered_games.sort(
+                    key=lambda g: max(g["prob_home_ml_pct"], g["prob_away_ml_pct"]),
+                    reverse=True,
+                )
+            elif sort_option == "Mayor Probabilidad de Cubrir Puck Line":
+                filtered_games.sort(
+                    key=lambda g: max(g["prob_home_pl_pct"], g["prob_away_pl_pct"]),
+                    reverse=True,
+                )
+            elif sort_option == "Mayor Probabilidad de Over":
+                filtered_games.sort(
+                    key=lambda g: g["prob_over_pct"],
+                    reverse=True,
+                )
+            elif sort_option == "Mayor Probabilidad de Under":
+                filtered_games.sort(
+                    key=lambda g: g["prob_under_pct"],
+                    reverse=True,
+                )
+            elif sort_option == "Mayor Valor Esperado (+EV %)":
+                filtered_games.sort(
+                    key=lambda g: g["best_bet"]["ev_pct"],
+                    reverse=True,
+                )
+
+            if not filtered_games:
+                st.info(
+                    f"No hay partidos que cumplan con el filtro **{market_filter}** "
+                    f"(Umbral actual: `+{ev_threshold:.1f}% EV`). Prueba reduciendo el umbral en el panel lateral o seleccionando 'Todos los partidos'."
+                )
+            else:
+                for row_start in range(0, len(filtered_games), 3):
+                    col1, col2, col3 = st.columns(3)
+                    row_cols = (col1, col2, col3)
+                    row_slice = filtered_games[row_start : row_start + 3]
+
+                    for col_idx, game_item in enumerate(row_slice):
+                        with row_cols[col_idx]:
+                            render_game_card(
+                                game_item,
+                                hfa_goals=hfa_goals,
+                                ev_threshold=ev_threshold,
+                            )
 
             with st.expander("📊 Tabla Maestra de Simulaciones Monte Carlo & Exportación (.xlsx)"):
                 st.dataframe(export_df, use_container_width=True, hide_index=True)
